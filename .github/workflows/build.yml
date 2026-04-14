@@ -2,11 +2,11 @@ name: Build & Release
 
 on:
   push:
-    branches: [master, test1]
+    branches: [master, test1, YukihookD]
     tags:
       - "v*"
   pull_request:
-    branches: [master, test1]
+    branches: [master, test1, YukihookD]
 
 env:
   JAVA_VERSION: "17"
@@ -48,6 +48,7 @@ jobs:
           unzip -t app/libs/xposed-api.jar > /dev/null 2>&1 && echo "JAR valid" || { echo "JAR invalid"; exit 1; }
 
       - name: Create keystore from secret
+        if: secrets.KEYSTORE_BASE64 != ''
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
@@ -59,7 +60,13 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build release APK
+        if: secrets.KEYSTORE_BASE64 != ''
         run: ./gradlew assembleRelease --no-daemon
+        timeout-minutes: 30
+
+      - name: Build debug APK
+        if: secrets.KEYSTORE_BASE64 == ''
+        run: ./gradlew assembleDebug --no-daemon
         timeout-minutes: 30
 
       - name: Upload APK artifact
@@ -67,7 +74,7 @@ jobs:
         if: always()
         with:
           name: mipay-gpay-lsp-${{ github.run_number }}
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/**/*.apk
           retention-days: 7
 
       - name: Create Release
@@ -84,7 +91,7 @@ jobs:
             ### 安装说明
             1. 下载下方 `app-release.apk`
             2. 在 LSPosed Manager 中启用模块
-            3. 勾选作用域：`小米智能卡`（`com.miui.tsmclient`）
+            3. 勾选作用域：`小米智能卡`（`com.miui.tsmclient`）和 `Google Wallet`（`com.google.android.apps.walletnfcrel`）
             4. 强制停止并重启小米智能卡
 
             ### 系统要求
@@ -108,7 +115,7 @@ jobs:
         run: |
           curl -s -X POST "$WECHAT_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"✅ **MiPay GPay LSP 构建成功**\\n> 版本: \`${{ github.ref_name }}\`\\n> 提交: \`${{ github.sha }}\`\\n\\n📦 [下载 APK](https://github.com/${{ github.repository }}/releases)\"}}" || true
+            -d "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"✅ **MiPay GPay LSP 构建成功**\n> 版本: \`${{ github.ref_name }}\`\n> 提交: \`${{ github.sha }}\`\n\n📦 [下载 APK](https://github.com/${{ github.repository }}/releases)\"}}" || true
 
       - name: Notify WeChat Failure
         if: ${{ failure() && env.WECHAT_WEBHOOK_URL != '' }}
@@ -117,4 +124,4 @@ jobs:
         run: |
           curl -s -X POST "$WECHAT_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"❌ **MiPay GPay LSP 构建失败**\\n> 提交: \`${{ github.sha }}\`\"}}" || true
+            -d "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"❌ **MiPay GPay LSP 构建失败**\n> 提交: \`${{ github.sha }}\`\"}}" || true
