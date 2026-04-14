@@ -65,18 +65,20 @@ class MainHook : IXposedHookLoadPackage {
         XposedBridge.log("$TAG: ★ Target matched! Setting up hooks...")
 
         try {
-            val activityClass = XposedHelpers.findClass("android.app.Activity", lpparam.classLoader)
-            XposedHelpers.findAndHookMethod(activityClass, "onResume", object : XC_MethodHook() {
+            // 只注入 DoubleClickActivity
+            val targetClass = XposedHelpers.findClass(
+                "com.miui.tsmclient.ui.quick.DoubleClickActivity",
+                lpparam.classLoader
+            )
+            XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as Activity
-                    if (activity.packageName == TARGET_PKG) {
-                        injectOnViewReady(activity)
-                    }
+                    injectOnViewReady(activity)
                 }
             })
-            XposedBridge.log("$TAG: ✓ android.app.Activity.onResume hooked")
+            XposedBridge.log("$TAG: ✓ DoubleClickActivity.onResume hooked")
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: ✗ Activity hook FAILED: ${e.message}")
+            XposedBridge.log("$TAG: ✗ DoubleClickActivity hook FAILED: ${e.message}")
         }
     }
 
@@ -184,10 +186,17 @@ class GooglePayButtonView @JvmOverloads constructor(
     // 圆角矩形
     private val rect = RectF()
 
-    // MD3 Surface Tint 色（兜底蓝色）
+    // MD3 Surface Tint 色（深色模式用 #121212，浅色用莫奈 system_accent1_100，兜底蓝色）
     private val monetColor: Int by lazy {
         try {
-            if (android.os.Build.VERSION.SDK_INT >= 31) {
+            // 判断系统深色模式
+            val uiMode = context.resources.configuration.uiMode and
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK
+            val isDark = uiMode == android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+            if (isDark) {
+                android.graphics.Color.parseColor("#121212")
+            } else if (android.os.Build.VERSION.SDK_INT >= 31) {
                 val resId = android.R.color.system_accent1_100
                 context.theme.resources.getColor(resId, context.theme)
             } else {
@@ -293,37 +302,20 @@ class GooglePayButtonView @JvmOverloads constructor(
 
     private fun openWallet(context: Context) {
         android.util.Log.d("GPB", "Google Pay button clicked")
-        val walletActivities = listOf(
-            Pair("com.google.android.apps.walletnfcrel",
-                "com.google.android.apps.walletnfcrel.common.secureui.MainActivity"),
-            Pair("com.google.android.apps.walletnfcrel",
-                "com.google.android.apps.wallet.main.WalletActivity"),
-            Pair("com.google.android.apps.walletnfcrel",
-                "com.google.commerce.tapandpay.android.home.HomeActivity"),
-            Pair("com.google.android.apps.walletnfcrel",
-                "com.google.commerce.tapandpay.android.mainactivity.MainActivity"),
-            Pair("com.google.android.apps.walletnfcrel",
-                "com.google.commerce.tapandpay.android.payments.transition.ui.TapPayActivity"),
-            Pair("com.android.chrome",
-                "com.google.android.apps.chrome.Main"),
-            Pair("com.android.chrome",
-                "org.chromium.chrome.browser.ChromeTabbedActivity"),
-        )
-
-        for ((pkg, cls) in walletActivities) {
-            try {
-                val intent = android.content.Intent().apply {
-                    component = ComponentName(pkg, cls)
-                    flags = (android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                            or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                }
-                context.startActivity(intent)
-                return
-            } catch (e: Throwable) {
-                // 尝试下一个
+        try {
+            val intent = android.content.Intent().apply {
+                component = ComponentName(
+                    "com.google.android.apps.walletnfcrel",
+                    "com.google.android.apps.wallet.main.WalletActivity"
+                )
+                flags = (android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                        or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
+            context.startActivity(intent)
+        } catch (e: Throwable) {
+            android.util.Log.e("GPB", "openWallet failed: ${e.message}")
+            Toast.makeText(context, "未安装 Google Wallet", Toast.LENGTH_LONG).show()
         }
-        Toast.makeText(context, "未安装 Google Wallet / Chrome", Toast.LENGTH_LONG).show()
     }
 }
