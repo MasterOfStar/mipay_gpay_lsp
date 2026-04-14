@@ -60,90 +60,21 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // ════════════════════════ MiPay 注入 + NFC 广播接收 ════════════════════════
+    // ════════════════════════ MiPay 注入 ════════════════════════
 
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
-        // Hook Activity onCreate 来注册广播接收器
         try {
-            val activityClass = XposedHelpers.findClass("android.app.Activity", lpparam.classLoader)
-            XposedHelpers.findAndHookMethod(activityClass, "onCreate", android.os.Bundle::class.java, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val activity = param.thisObject as Activity
-                    if (activity.javaClass.name.contains("DoubleClickActivity")) {
-                        registerNfcReceiver(activity)
-                        injectButton(activity)
-                    }
+            val targetClass = XposedHelpers.findClass(
+                "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
+            )
+            XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    injectButton(param.thisObject as Activity)
                 }
             })
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: MiPay hook failed: ${e.message}")
         }
-    }
-
-    private fun registerNfcReceiver(activity: Activity) {
-        try {
-            val receiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    val component = intent.getStringExtra("component") ?: return
-                    val action = intent.getStringExtra("action") ?: "操作"
-                    XposedBridge.log("$TAG: [MiPay进程] 收到 NFC 设置请求: $component")
-                    setNfcViaReflection(activity, component, action)
-                }
-            }
-            activity.registerReceiver(receiver, IntentFilter(ACTION_SET_NFC))
-            XposedBridge.log("$TAG: MiPay DoubleClickActivity 已注册 NFC 广播接收器")
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG: 注册 NFC 广播接收器失败: ${e.message}")
-        }
-    }
-
-    // 在 MiPay 进程执行反射修改（有权限）
-    private fun setNfcViaReflection(activity: Activity, component: String, action: String) {
-        Thread {
-            try {
-                // 参考 YukiHook 写法：反射调用 Settings.Secure.putStringForUser
-                val settingsSecureClass = XposedHelpers.findClass("android.provider.Settings\$Secure", activity.classLoader)
-                val putStringForUserMethod = settingsSecureClass.getDeclaredMethod(
-                    "putStringForUser",
-                    android.content.ContentResolver::class.java,
-                    String::class.java,
-                    String::class.java,
-                    Int::class.javaPrimitiveType
-                )
-                val userHandleClass = XposedHelpers.findClass("android.os.UserHandle", activity.classLoader)
-                val myUserIdMethod = userHandleClass.getDeclaredMethod("myUserId")
-                val userId = myUserIdMethod.invoke(null) as Int
-
-                val result = putStringForUserMethod.invoke(
-                    null,
-                    activity.contentResolver,
-                    NFC_KEY,
-                    component,
-                    userId
-                ) as Boolean
-
-                XposedBridge.log("$TAG: putStringForUser($component, userId=$userId) = $result")
-
-                if (result) {
-                    // 验证
-                    Thread.sleep(200)
-                    val verify = Settings.Secure.getString(activity.contentResolver, NFC_KEY)
-                    if (verify == component) {
-                        XposedBridge.log("$TAG: [MiPay进程] $action NFC 成功")
-                        showToast(activity, "$action NFC 成功")
-                    } else {
-                        XposedBridge.log("$TAG: [MiPay进程] 写入验证失败: $verify")
-                        showToast(activity, "$action NFC: 验证失败")
-                    }
-                } else {
-                    XposedBridge.log("$TAG: [MiPay进程] putStringForUser 返回 false")
-                    showToast(activity, "$action NFC: 返回 false")
-                }
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: [MiPay进程] 反射失败: ${e.message}")
-                showToast(activity, "$action NFC: ${e.message}")
-            }
-        }.start()
     }
 
     private fun injectButton(activity: Activity) {
@@ -173,7 +104,7 @@ class MainHook : IXposedHookLoadPackage {
         decor.post { decor.addView(btn) }
     }
 
-    // ════════════════════════ Wallet NFC 管理 ════════════════════════
+    // ════════════════════════ Wallet NFC 管理 (广播机制) ════════════════════════
 
     private var activeCount = 0
     private var savedNfc: String? = null
@@ -210,7 +141,7 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: Current NFC=$current")
             if (current != WALLET_NFC_COMPONENT) {
                 savedNfc = current
-                // 发送广播给 MiPay 进程执行
+                // 发送广播给模块进程执行 su
                 sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
             }
         }
@@ -231,19 +162,18 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // Wallet 进程发送广播给 MiPay 进程
+    // Wallet 进程发送广播给模块进程
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
         try {
             val intent = Intent(ACTION_SET_NFC).apply {
-                setPackage(MIPAY_PKG)
+                setPackage("com.mipay.gpay.lsp")
                 putExtra("component", component)
                 putExtra("action", action)
             }
             context.sendBroadcast(intent)
-            XposedBridge.log("$TAG: 已发送 NFC 广播给 MiPay: $component")
+            XposedBridge.log("$TAG: 已发送 NFC 广播给模块: $component")
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: 发送 NFC 广播失败: ${e.message}")
-            showToast(context, "$action NFC: 广播发送失败")
         }
     }
 
