@@ -25,8 +25,10 @@ import com.caverock.androidsvg.SVGParseException
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
+import com.highcapable.yukihookapi.hook.factory.field
 import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
+import com.highcapable.yukihookapi.hook.type.android.ActivityClass
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import java.io.File
 import java.text.SimpleDateFormat
@@ -70,35 +72,34 @@ object HookEntry : IYukiHookXposedInit {
 
     override fun onInit() = configs {
         debugLog { tag = TAG }
-        loggerD(msg = "onInit")
     }
 
     override fun onHook() = encase {
         // Hook 小米智能卡 - 注入按钮
         loadApp(MIPAY_PKG) {
-            injectMember {
-                method {
-                    name = "onResume"
-                    emptyParam()
-                }
-                afterHook {
-                    val activity = thisObject as? Activity ?: return@afterHook
-                    injectButton(activity)
+            "$packageName.ui.quick.DoubleClickActivity".hook {
+                injectMember {
+                    method {
+                        name = "onResume"
+                        emptyParam()
+                    }
+                    afterHook {
+                        injectButton(this as? Activity ?: return@afterHook)
+                    }
                 }
             }
         }
 
         // Hook Google Wallet - NFC 自动切换
         loadApp(WALLET_PKG) {
-            // Hook Activity 基类，监听前后台切换
-            "android.app.Activity".hook {
+            ActivityClass.hook {
                 injectMember {
                     method {
                         name = "onStart"
                         emptyParam()
                     }
                     afterHook {
-                        onForeground(thisObject as? Activity ?: return@afterHook)
+                        onForeground(this as? Activity ?: return@afterHook)
                     }
                 }
 
@@ -108,7 +109,7 @@ object HookEntry : IYukiHookXposedInit {
                         emptyParam()
                     }
                     afterHook {
-                        onBackground(thisObject as? Activity ?: return@afterHook)
+                        onBackground(this as? Activity ?: return@afterHook)
                     }
                 }
             }
@@ -319,8 +320,8 @@ object HookEntry : IYukiHookXposedInit {
 // ════════════════════════ Google Pay 按钮 View ════════════════════════
 
 class GooglePayButtonView @JvmOverloads constructor(
-    context: Context, attrs: AttributeSet? = null, defStyle: Int = 0
-) : View(context, attrs, defStyle) {
+    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
+) : View(context, attrs, defStyleAttr) {
 
     private var svg: SVG? = null
     private var bmp: Bitmap? = null
@@ -381,7 +382,7 @@ class GooglePayButtonView @JvmOverloads constructor(
         }
     }
 
-    override fun onMeasure(wSpec: Int, hSpec: Int) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val d = resources.displayMetrics.density
         setMeasuredDimension((104 * d).toInt(), (58 * d).toInt())
     }
