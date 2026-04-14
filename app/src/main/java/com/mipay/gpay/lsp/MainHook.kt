@@ -168,7 +168,8 @@ class MainHook : IXposedHookLoadPackage {
     private fun setNfcDefaultWithFallback(context: Context, component: String, action: String) {
         Thread {
             var lastFailMethod: String? = null
-            
+            var failCount = 0
+
             // 方法1: putStringForUser (隐藏 API)
             try {
                 val userId = XposedHelpers.callStaticMethod(UserHandle::class.java, "myUserId") as Int
@@ -182,14 +183,24 @@ class MainHook : IXposedHookLoadPackage {
                 ) as Boolean
                 XposedBridge.log("$TAG: putStringForUser($component, userId=$userId) = $result")
                 if (result) {
-                    XposedBridge.log("$TAG: $action NFC 成功 (方法1: putStringForUser)")
-                    return@Thread
+                    // 验证是否真的写入成功
+                    Thread.sleep(200)
+                    val verify = Settings.Secure.getString(context.contentResolver, NFC_KEY)
+                    if (verify == component) {
+                        XposedBridge.log("$TAG: $action NFC 成功 (方法1: putStringForUser)")
+                        return@Thread
+                    }
+                    XposedBridge.log("$TAG: 方法1 返回 true 但验证失败: $verify")
+                    lastFailMethod = "方法1: 写入验证失败"
+                } else {
+                    lastFailMethod = "方法1: putStringForUser 返回 false"
                 }
-                lastFailMethod = "方法1: putStringForUser 返回 false"
             } catch (e: Throwable) {
                 XposedBridge.log("$TAG: putStringForUser failed: ${e.message}")
                 lastFailMethod = "方法1: ${e.message}"
             }
+            failCount++
+            showToast(context, "$action NFC: ${lastFailMethod ?: "方法1失败"}")
 
             Thread.sleep(1000)
 
@@ -198,34 +209,43 @@ class MainHook : IXposedHookLoadPackage {
                 val result = Settings.Secure.putString(context.contentResolver, NFC_KEY, component)
                 XposedBridge.log("$TAG: putString($component) = $result")
                 if (result) {
-                    XposedBridge.log("$TAG: $action NFC 成功 (方法2: putString)")
-                    return@Thread
+                    Thread.sleep(200)
+                    val verify = Settings.Secure.getString(context.contentResolver, NFC_KEY)
+                    if (verify == component) {
+                        XposedBridge.log("$TAG: $action NFC 成功 (方法2: putString)")
+                        return@Thread
+                    }
+                    XposedBridge.log("$TAG: 方法2 返回 true 但验证失败: $verify")
+                    lastFailMethod = "方法2: 写入验证失败"
+                } else {
+                    lastFailMethod = "方法2: putString 返回 false"
                 }
-                lastFailMethod = "方法2: putString 返回 false"
             } catch (e: Throwable) {
                 XposedBridge.log("$TAG: putString failed: ${e.message}")
                 lastFailMethod = "方法2: ${e.message}"
             }
+            failCount++
+            showToast(context, "$action NFC: ${lastFailMethod ?: "方法2失败"}")
 
             Thread.sleep(1000)
 
-            // 方法3: su 命令
+            // 方法3: su 命令 (通过启动 Service 在模块进程执行)
             try {
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings put secure $NFC_KEY $component"))
-                p.waitFor()
-                val exitCode = p.exitValue()
-                XposedBridge.log("$TAG: su fallback exit=$exitCode")
-                if (exitCode == 0) {
-                    XposedBridge.log("$TAG: $action NFC 成功 (方法3: su)")
-                    return@Thread
+                val suIntent = Intent().apply {
+                    setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSuService")
+                    putExtra("component", component)
+                    putExtra("action", action)
                 }
-                lastFailMethod = "方法3: su exit=$exitCode"
+                context.startService(suIntent)
+                XposedBridge.log("$TAG: 已启动 NfcSuService 执行 su 命令")
+                // 不再在这里显示 Toast，由 Service 处理
+                return@Thread
             } catch (e: Throwable) {
-                XposedBridge.log("$TAG: su failed: ${e.message}")
+                XposedBridge.log("$TAG: 启动 NfcSuService 失败: ${e.message}")
                 lastFailMethod = "方法3: ${e.message}"
             }
 
-            // 全部失败，显示 Toast
+            // 全部失败
             XposedBridge.log("$TAG: All methods failed for $action NFC")
             showToast(context, "$action NFC 失败: $lastFailMethod")
         }.start()
