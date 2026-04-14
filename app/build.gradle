@@ -35,7 +35,7 @@ android {
 }
 
 dependencies {
-    compileOnly 'de.robv.android.xposed:api:82'
+    compileOnly files('libs/xposed-api.jar')
     implementation 'com.highcapable.yukihookapi:api:1.1.11'
     ksp 'com.highcapable.yukihookapi:ksp-xposed:1.1.11'
     implementation 'com.caverock:androidsvg-aar:1.4'
