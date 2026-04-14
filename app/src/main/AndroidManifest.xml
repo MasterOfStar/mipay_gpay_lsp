@@ -6,7 +6,7 @@
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
 
-        <!-- LSPosed 模块声明 -->
+        <!-- YukiHook 模块声明 -->
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
@@ -21,15 +21,6 @@
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
-
-        <!-- NFC su 执行接收器 (模块进程) -->
-        <receiver
-            android:name=".NfcSuReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.mipay.gpay.lsp.SET_NFC" />
-            </intent-filter>
-        </receiver>
 
     </application>
 

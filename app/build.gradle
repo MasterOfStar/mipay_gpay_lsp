@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp'
+}
+
+android {
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.mipay.gpay.lsp"
+        minSdk 30
+        targetSdk 34
+        versionCode 1
+        versionName "1.0-YukihookD"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = '11'
+    }
+
+    namespace 'com.mipay.gpay.lsp'
+}
+
+dependencies {
+    compileOnly 'de.robv.android.xposed:api:82'
+    implementation 'com.highcapable.yukihookapi:api:1.1.11'
+    ksp 'com.highcapable.yukihookapi:ksp-xposed:1.1.11'
+    implementation 'com.caverock:androidsvg-aar:1.4'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4'
+    implementation 'com.android.support:support-annotations:28.0.0'
+}
