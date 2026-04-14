@@ -2,18 +2,15 @@ package com.mipay.gpay.lsp
 
 import android.app.Activity
 import android.content.ComponentName
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.UserHandle
 import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
@@ -25,10 +22,10 @@ import com.caverock.androidsvg.SVGParseException
 import com.highcapable.yukihookapi.annotation.xposed.InjectYukiHookWithXposed
 import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
-import com.highcapable.yukihookapi.hook.factory.field
 import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
 import com.highcapable.yukihookapi.hook.type.android.ActivityClass
+import com.highcapable.yukihookapi.hook.type.android.BundleClass
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import java.io.File
 import java.text.SimpleDateFormat
@@ -80,11 +77,14 @@ object HookEntry : IYukiHookXposedInit {
             "$packageName.ui.quick.DoubleClickActivity".hook {
                 injectMember {
                     method {
-                        name = "onResume"
-                        emptyParam()
+                        name = "onCreate"
+                        param(BundleClass)
                     }
                     afterHook {
-                        injectButton(this as? Activity ?: return@afterHook)
+                        // 注入按钮
+                        (this as? Activity)?.let { activity ->
+                            injectButton(activity)
+                        }
                     }
                 }
             }
@@ -99,7 +99,9 @@ object HookEntry : IYukiHookXposedInit {
                         emptyParam()
                     }
                     afterHook {
-                        onForeground(this as? Activity ?: return@afterHook)
+                        (this as? Activity)?.let { activity ->
+                            onForeground(activity)
+                        }
                     }
                 }
 
@@ -109,7 +111,9 @@ object HookEntry : IYukiHookXposedInit {
                         emptyParam()
                     }
                     afterHook {
-                        onBackground(this as? Activity ?: return@afterHook)
+                        (this as? Activity)?.let { activity ->
+                            onBackground(activity)
+                        }
                     }
                 }
             }
@@ -146,7 +150,7 @@ object HookEntry : IYukiHookXposedInit {
         logD(msg = "Button injected")
     }
 
-    // ════════════════════════ Wallet NFC 切换 (纯反射实现) ════════════════════════
+    // ════════════════════════ Wallet NFC 切换 (纯反射 + su 命令) ════════════════════════
 
     private fun onForeground(activity: Activity) {
         restoreTask?.let { handler.removeCallbacks(it) }
@@ -158,7 +162,7 @@ object HookEntry : IYukiHookXposedInit {
                 val current = getNfcDefault(activity)
                 if (current != WALLET_NFC_COMPONENT) {
                     savedNfcComponent = current
-                    setNfcDefaultViaReflection(activity, WALLET_NFC_COMPONENT)
+                    setNfcDefaultViaSu(activity, WALLET_NFC_COMPONENT)
                     showToast(activity, "已切换 NFC 支付为 Google Wallet")
                     logD(msg = "Switched NFC to Wallet: saved=$current")
                 } else {
@@ -178,7 +182,7 @@ object HookEntry : IYukiHookXposedInit {
                 restoreTask = Runnable {
                     try {
                         savedNfcComponent?.let {
-                            setNfcDefaultViaReflection(activity, it)
+                            setNfcDefaultViaSu(activity, it)
                             showToast(activity, "已恢复 NFC 支付设置")
                             logD(msg = "Restored NFC to: $it")
                         }
@@ -193,71 +197,46 @@ object HookEntry : IYukiHookXposedInit {
         }
     }
 
-    // ════════════════════════ Settings.Secure 反射工具 ════════════════════════
-
     /**
-     * 纯反射方式设置 NFC 默认支付组件
-     * 优先尝试 Settings.Secure.putStringForUser
-     * 如果失败，尝试 su 命令
+     * 通过 su 命令设置 NFC 默认支付组件
+     * 这是最可靠的方式，适用于 LSPosed 环境
      */
-    private fun setNfcDefaultViaReflection(context: Context, component: String): Boolean {
-        logD(msg = "setNfcDefaultViaReflection: $component")
+    private fun setNfcDefaultViaSu(context: Context, component: String): Boolean {
+        logD(msg = "setNfcDefaultViaSu: $component")
+        
+        // 方法1: 尝试 settings 命令 (需要 root 或 ADB 权限)
+        if (tryExecSu("settings put secure $NFC_KEY $component")) {
+            logD(msg = "settings put success via su")
+            return true
+        }
 
-        // 方法1: 尝试 ContentResolver.update + Secure.CONTENT_URI
+        // 方法2: 尝试 ContentResolver 反射
         try {
             val secureClass = Class.forName("android.provider.Settings\$Secure")
-            val contentUri = secureClass.getField("CONTENT_URI").get(null) as Uri
-            
-            val values = ContentValues().apply {
+            val contentUriField = secureClass.getField("CONTENT_URI")
+            val contentUri = contentUriField.get(null) as android.net.Uri
+
+            val resolver = context.contentResolver
+            val updateMethod = android.content.ContentResolver::class.java.getMethod(
+                "update",
+                android.net.Uri::class.java,
+                android.content.ContentValues::class.java,
+                String::class.java,
+                Array<String>::class.java
+            )
+
+            val values = android.content.ContentValues().apply {
                 put(NFC_KEY, component)
             }
 
-            context.contentResolver.update(contentUri, values, "$NFC_KEY = ?", arrayOf(NFC_KEY))
+            updateMethod.invoke(resolver, contentUri, values, "$NFC_KEY = ?", arrayOf(NFC_KEY))
             logD(msg = "ContentResolver.update success")
             return true
         } catch (e: Throwable) {
             logD(msg = "ContentResolver.update failed: ${e.message}")
         }
 
-        // 方法2: 尝试 Settings.Secure.putString 静态方法
-        try {
-            val secureClass = Class.forName("android.provider.Settings\$Secure")
-            val putStringMethod = secureClass.getMethod(
-                "putString",
-                Class.forName("android.content.ContentResolver"),
-                String::class.java,
-                String::class.java
-            )
-            putStringMethod.invoke(null, context.contentResolver, NFC_KEY, component)
-            logD(msg = "Settings.Secure.putString success")
-            return true
-        } catch (e: Throwable) {
-            logD(msg = "putString failed: ${e.message}")
-        }
-
-        // 方法3: 尝试 putStringForUser (需要 root 权限)
-        try {
-            val secureClass = Class.forName("android.provider.Settings\$Secure")
-            val userIdMethod = UserHandle::class.java.getMethod("myUserId")
-            val userId = userIdMethod.invoke(null) as Int
-            
-            val putStringForUserMethod = secureClass.getMethod(
-                "putStringForUser",
-                Class.forName("android.content.ContentResolver"),
-                String::class.java,
-                String::class.java,
-                Int::class.javaPrimitiveType
-            )
-            putStringForUserMethod.invoke(null, context.contentResolver, NFC_KEY, component, Integer.valueOf(userId))
-            logD(msg = "putStringForUser success")
-            return true
-        } catch (e: Throwable) {
-            logD(msg = "putStringForUser failed: ${e.message}")
-        }
-
-        // 方法4: su 命令 (最后备选)
-        logD(msg = "Trying su command fallback")
-        return tryExecSu("settings put secure $NFC_KEY $component")
+        return false
     }
 
     /**
