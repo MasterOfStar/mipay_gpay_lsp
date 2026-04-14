@@ -2,12 +2,14 @@ package com.mipay.gpay.lsp
 
 import android.app.Activity
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -25,10 +27,6 @@ import com.highcapable.yukihookapi.hook.factory.configs
 import com.highcapable.yukihookapi.hook.factory.encase
 import com.highcapable.yukihookapi.hook.factory.method
 import com.highcapable.yukihookapi.hook.log.loggerD
-import com.highcapable.yukihookapi.hook.type.android.ContextClass
-import com.highcapable.yukihookapi.hook.type.java.BooleanType
-import com.highcapable.yukihookapi.hook.type.java.IntType
-import com.highcapable.yukihookapi.hook.type.java.StringClass
 import com.highcapable.yukihookapi.hook.xposed.proxy.IYukiHookXposedInit
 import java.io.File
 import java.text.SimpleDateFormat
@@ -204,78 +202,56 @@ object HookEntry : IYukiHookXposedInit {
     private fun setNfcDefaultViaReflection(context: Context, component: String): Boolean {
         logD(msg = "setNfcDefaultViaReflection: $component")
 
-        // 方法1: 尝试 Settings.Secure.putStringForUser (需要 su)
+        // 方法1: 尝试 ContentResolver.update + Secure.CONTENT_URI
         try {
             val secureClass = Class.forName("android.provider.Settings\$Secure")
-            val userId = UserHandle::class.java.method { name = "myUserId" }.get().invoke()
+            val contentUri = secureClass.getField("CONTENT_URI").get(null) as Uri
             
-            secureClass.method {
-                name = "putStringForUser"
-                paramCount(4)
-                param(
-                    Class.forName("android.content.ContentResolver"),
-                    StringClass,
-                    StringClass,
-                    IntType
-                )
-            }.get().call(context.contentResolver, NFC_KEY, component, userId)
+            val values = ContentValues().apply {
+                put(NFC_KEY, component)
+            }
 
-            logD(msg = "Reflection putStringForUser success")
+            context.contentResolver.update(contentUri, values, "$NFC_KEY = ?", arrayOf(NFC_KEY))
+            logD(msg = "ContentResolver.update success")
             return true
         } catch (e: Throwable) {
-            logD(msg = "putStringForUser failed: ${e.message}")
+            logD(msg = "ContentResolver.update failed: ${e.message}")
         }
 
-        // 方法2: 尝试 ContentResolver.setMode 或直接反射调用
+        // 方法2: 尝试 Settings.Secure.putString 静态方法
         try {
-            val resolver = context.contentResolver
             val secureClass = Class.forName("android.provider.Settings\$Secure")
-            
-            // 尝试直接调用 putString
             val putStringMethod = secureClass.getMethod(
                 "putString",
                 Class.forName("android.content.ContentResolver"),
                 String::class.java,
                 String::class.java
             )
-            putStringMethod.invoke(null, resolver, NFC_KEY, component)
-            
-            logD(msg = "Reflection putString success")
+            putStringMethod.invoke(null, context.contentResolver, NFC_KEY, component)
+            logD(msg = "Settings.Secure.putString success")
             return true
         } catch (e: Throwable) {
             logD(msg = "putString failed: ${e.message}")
         }
 
-        // 方法3: 尝试 Settings.Secure 直接设置
+        // 方法3: 尝试 putStringForUser (需要 root 权限)
         try {
-            val settingsClass = Class.forName("android.provider.Settings")
             val secureClass = Class.forName("android.provider.Settings\$Secure")
-            val contentResolverClass = Class.forName("android.content.ContentResolver")
-
-            // 获取 CONTENT_URI
-            val contentUriField = secureClass.getField("CONTENT_URI")
-            val contentUri = contentUriField.get(null) as? android.net.Uri
-
-            if (contentUri != null) {
-                // 使用 ContentResolver.update
-                val updateMethod = contentResolverClass.getMethod(
-                    "update",
-                    android.net.Uri::class.java,
-                    android.content.ContentValues::class.java,
-                    String::class.java,
-                    Array<String>::class.java
-                )
-
-                val values = android.content.ContentValues().apply {
-                    put(NFC_KEY, component)
-                }
-
-                updateMethod.invoke(resolver, contentUri, values, "$NFC_KEY = ?", arrayOf(NFC_KEY))
-                logD(msg = "ContentResolver.update success")
-                return true
-            }
+            val userIdMethod = UserHandle::class.java.getMethod("myUserId")
+            val userId = userIdMethod.invoke(null) as Int
+            
+            val putStringForUserMethod = secureClass.getMethod(
+                "putStringForUser",
+                Class.forName("android.content.ContentResolver"),
+                String::class.java,
+                String::class.java,
+                Int::class.javaPrimitiveType
+            )
+            putStringForUserMethod.invoke(null, context.contentResolver, NFC_KEY, component, userId)
+            logD(msg = "putStringForUser success")
+            return true
         } catch (e: Throwable) {
-            logD(msg = "ContentResolver.update failed: ${e.message}")
+            logD(msg = "putStringForUser failed: ${e.message}")
         }
 
         // 方法4: su 命令 (最后备选)
