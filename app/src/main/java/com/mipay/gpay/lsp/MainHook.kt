@@ -1,9 +1,11 @@
 package com.mipay.gpay.lsp
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -34,6 +36,7 @@ class MainHook : IXposedHookLoadPackage {
         private const val TAG = "MiPayGPay"
         private const val INJECT_TAG = "mipay_gpay_btn"
         private const val NFC_KEY = "nfc_payment_default_component"
+        private const val ACTION_SET_NFC = "com.mipay.gpay.lsp.SET_NFC"
 
         // Google Wallet HCE Service
         const val WALLET_NFC_COMPONENT = "com.google.android.gms/com.google.android.gms.tapandpay.hce.service.TpHceService"
@@ -57,21 +60,90 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // ════════════════════════ MiPay 注入 ════════════════════════
+    // ════════════════════════ MiPay 注入 + NFC 广播接收 ════════════════════════
 
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
+        // Hook Activity onCreate 来注册广播接收器
         try {
-            val targetClass = XposedHelpers.findClass(
-                "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
-            )
-            XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    injectButton(param.thisObject as Activity)
+            val activityClass = XposedHelpers.findClass("android.app.Activity", lpparam.classLoader)
+            XposedHelpers.findAndHookMethod(activityClass, "onCreate", android.os.Bundle::class.java, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as Activity
+                    if (activity.javaClass.name.contains("DoubleClickActivity")) {
+                        registerNfcReceiver(activity)
+                        injectButton(activity)
+                    }
                 }
             })
         } catch (e: Throwable) {
             XposedBridge.log("$TAG: MiPay hook failed: ${e.message}")
         }
+    }
+
+    private fun registerNfcReceiver(activity: Activity) {
+        try {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    val component = intent.getStringExtra("component") ?: return
+                    val action = intent.getStringExtra("action") ?: "操作"
+                    XposedBridge.log("$TAG: [MiPay进程] 收到 NFC 设置请求: $component")
+                    setNfcViaReflection(activity, component, action)
+                }
+            }
+            activity.registerReceiver(receiver, IntentFilter(ACTION_SET_NFC))
+            XposedBridge.log("$TAG: MiPay DoubleClickActivity 已注册 NFC 广播接收器")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: 注册 NFC 广播接收器失败: ${e.message}")
+        }
+    }
+
+    // 在 MiPay 进程执行反射修改（有权限）
+    private fun setNfcViaReflection(activity: Activity, component: String, action: String) {
+        Thread {
+            try {
+                // 参考 YukiHook 写法：反射调用 Settings.Secure.putStringForUser
+                val settingsSecureClass = XposedHelpers.findClass("android.provider.Settings\$Secure", activity.classLoader)
+                val putStringForUserMethod = settingsSecureClass.getDeclaredMethod(
+                    "putStringForUser",
+                    android.content.ContentResolver::class.java,
+                    String::class.java,
+                    String::class.java,
+                    Int::class.javaPrimitiveType
+                )
+                val userHandleClass = XposedHelpers.findClass("android.os.UserHandle", activity.classLoader)
+                val myUserIdMethod = userHandleClass.getDeclaredMethod("myUserId")
+                val userId = myUserIdMethod.invoke(null) as Int
+
+                val result = putStringForUserMethod.invoke(
+                    null,
+                    activity.contentResolver,
+                    NFC_KEY,
+                    component,
+                    userId
+                ) as Boolean
+
+                XposedBridge.log("$TAG: putStringForUser($component, userId=$userId) = $result")
+
+                if (result) {
+                    // 验证
+                    Thread.sleep(200)
+                    val verify = Settings.Secure.getString(activity.contentResolver, NFC_KEY)
+                    if (verify == component) {
+                        XposedBridge.log("$TAG: [MiPay进程] $action NFC 成功")
+                        showToast(activity, "$action NFC 成功")
+                    } else {
+                        XposedBridge.log("$TAG: [MiPay进程] 写入验证失败: $verify")
+                        showToast(activity, "$action NFC: 验证失败")
+                    }
+                } else {
+                    XposedBridge.log("$TAG: [MiPay进程] putStringForUser 返回 false")
+                    showToast(activity, "$action NFC: 返回 false")
+                }
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG: [MiPay进程] 反射失败: ${e.message}")
+                showToast(activity, "$action NFC: ${e.message}")
+            }
+        }.start()
     }
 
     private fun injectButton(activity: Activity) {
@@ -138,7 +210,8 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: Current NFC=$current")
             if (current != WALLET_NFC_COMPONENT) {
                 savedNfc = current
-                setNfcDefaultWithFallback(activity, WALLET_NFC_COMPONENT, "切换")
+                // 发送广播给 MiPay 进程执行
+                sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
             }
         }
     }
@@ -149,7 +222,7 @@ class MainHook : IXposedHookLoadPackage {
             activeCount = 0
             restoreTask = Runnable {
                 savedNfc?.let {
-                    setNfcDefaultWithFallback(activity, it, "还原")
+                    sendNfcBroadcast(activity, it, "还原")
                 }
                 savedNfc = null
                 restoreTask = null
@@ -158,136 +231,26 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
+    // Wallet 进程发送广播给 MiPay 进程
+    private fun sendNfcBroadcast(context: Context, component: String, action: String) {
+        try {
+            val intent = Intent(ACTION_SET_NFC).apply {
+                setPackage(MIPAY_PKG)
+                putExtra("component", component)
+                putExtra("action", action)
+            }
+            context.sendBroadcast(intent)
+            XposedBridge.log("$TAG: 已发送 NFC 广播给 MiPay: $component")
+        } catch (e: Throwable) {
+            XposedBridge.log("$TAG: 发送 NFC 广播失败: ${e.message}")
+            showToast(context, "$action NFC: 广播发送失败")
+        }
+    }
+
     private fun showToast(context: Context, msg: String) {
         handler.post {
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
-    }
-
-    // 多重 fallback，间隔 1 秒，显示具体失败方案
-    private fun setNfcDefaultWithFallback(context: Context, component: String, action: String) {
-        Thread {
-            var lastFailMethod: String? = null
-            var failCount = 0
-
-            // 方法1: putStringForUser (隐藏 API)
-            try {
-                val userId = XposedHelpers.callStaticMethod(UserHandle::class.java, "myUserId") as Int
-                val result = XposedHelpers.callStaticMethod(
-                    Settings.Secure::class.java,
-                    "putStringForUser",
-                    context.contentResolver,
-                    NFC_KEY,
-                    component,
-                    userId
-                ) as Boolean
-                XposedBridge.log("$TAG: putStringForUser($component, userId=$userId) = $result")
-                if (result) {
-                    // 验证是否真的写入成功
-                    Thread.sleep(200)
-                    val verify = Settings.Secure.getString(context.contentResolver, NFC_KEY)
-                    if (verify == component) {
-                        XposedBridge.log("$TAG: $action NFC 成功 (方法1: putStringForUser)")
-                        return@Thread
-                    }
-                    XposedBridge.log("$TAG: 方法1 返回 true 但验证失败: $verify")
-                    lastFailMethod = "方法1: 写入验证失败"
-                } else {
-                    lastFailMethod = "方法1: putStringForUser 返回 false"
-                }
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: putStringForUser failed: ${e.message}")
-                lastFailMethod = "方法1: ${e.message}"
-            }
-            failCount++
-            showToast(context, "$action NFC: ${lastFailMethod ?: "方法1失败"}")
-
-            Thread.sleep(1000)
-
-            // 方法2: 普通 putString
-            try {
-                val result = Settings.Secure.putString(context.contentResolver, NFC_KEY, component)
-                XposedBridge.log("$TAG: putString($component) = $result")
-                if (result) {
-                    Thread.sleep(200)
-                    val verify = Settings.Secure.getString(context.contentResolver, NFC_KEY)
-                    if (verify == component) {
-                        XposedBridge.log("$TAG: $action NFC 成功 (方法2: putString)")
-                        return@Thread
-                    }
-                    XposedBridge.log("$TAG: 方法2 返回 true 但验证失败: $verify")
-                    lastFailMethod = "方法2: 写入验证失败"
-                } else {
-                    lastFailMethod = "方法2: putString 返回 false"
-                }
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: putString failed: ${e.message}")
-                lastFailMethod = "方法2: ${e.message}"
-            }
-            failCount++
-            showToast(context, "$action NFC: ${lastFailMethod ?: "方法2失败"}")
-
-            Thread.sleep(1000)
-
-            // 方法3: su 命令 (通过 am startservice 启动模块 Service)
-            try {
-                val amCmd = "am startservice -n com.mipay.gpay.lsp/.NfcSuService --es component \"$component\" --es action \"$action\""
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", amCmd))
-                p.waitFor()
-                val exitCode = p.exitValue()
-                XposedBridge.log("$TAG: am startservice exit=$exitCode")
-                // Service 会处理 Toast，这里直接返回
-                return@Thread
-            } catch (e: Throwable) {
-                XposedBridge.log("$TAG: am startservice 失败: ${e.message}")
-                lastFailMethod = "方法3: ${e.message}"
-                showToast(context, "$action NFC: $lastFailMethod")
-            }
-
-            // 全部失败
-            XposedBridge.log("$TAG: All methods failed for $action NFC")
-        }.start()
-    }
-
-    // 保留同步版本供其他用途
-    private fun setNfcDefault(context: Context, component: String): Boolean {
-        XposedBridge.log("$TAG: setNfcDefault called: $component")
-
-        try {
-            val userId = XposedHelpers.callStaticMethod(UserHandle::class.java, "myUserId") as Int
-            val result = XposedHelpers.callStaticMethod(
-                Settings.Secure::class.java,
-                "putStringForUser",
-                context.contentResolver,
-                NFC_KEY,
-                component,
-                userId
-            ) as Boolean
-            XposedBridge.log("$TAG: putStringForUser($component, userId=$userId) = $result")
-            if (result) return true
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG: putStringForUser failed: ${e.message}")
-        }
-
-        try {
-            val result = Settings.Secure.putString(context.contentResolver, NFC_KEY, component)
-            XposedBridge.log("$TAG: putString($component) = $result")
-            if (result) return true
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG: putString failed: ${e.message}")
-        }
-
-        try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings put secure $NFC_KEY $component"))
-            p.waitFor()
-            val exitCode = p.exitValue()
-            XposedBridge.log("$TAG: su fallback exit=$exitCode")
-            if (exitCode == 0) return true
-        } catch (e: Throwable) {
-            XposedBridge.log("$TAG: su failed: ${e.message}")
-        }
-
-        return false
     }
 
     private fun getNfcDefault(context: Context): String? {
