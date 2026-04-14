@@ -23,7 +23,8 @@ class NfcSuReceiver : BroadcastReceiver() {
         Thread {
             try {
                 // 在模块进程执行 su 命令
-                val cmd = "settings put secure $NFC_KEY $component"
+                val cmd = "settings put secure " + NFC_KEY + " " + component
+                android.util.Log.d(TAG, "[模块进程] 执行命令: su -c '$cmd'")
                 val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
                 p.waitFor()
                 val exitCode = p.exitValue()
@@ -33,7 +34,9 @@ class NfcSuReceiver : BroadcastReceiver() {
                 if (exitCode == 0) {
                     // 验证
                     Thread.sleep(200)
-                    val verifyP = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings get secure $NFC_KEY"))
+                    val verifyCmd = "settings get secure " + NFC_KEY
+                    android.util.Log.d(TAG, "[模块进程] 验证命令: su -c '$verifyCmd'")
+                    val verifyP = Runtime.getRuntime().exec(arrayOf("su", "-c", verifyCmd))
                     verifyP.waitFor()
                     val verify = verifyP.inputStream.bufferedReader().readText().trim()
 
@@ -41,8 +44,8 @@ class NfcSuReceiver : BroadcastReceiver() {
                         android.util.Log.i(TAG, "[模块进程] $action NFC 成功")
                         showToast(context, "$action NFC 成功")
                     } else {
-                        android.util.Log.w(TAG, "[模块进程] su exit=0 但验证失败: $verify")
-                        showToast(context, "$action NFC: 验证失败 ($verify)")
+                        android.util.Log.w(TAG, "[模块进程] su exit=0 但验证失败: 期望=$component, 实际=$verify")
+                        showToast(context, "$action NFC: 验证失败 (期望=$component, 实际=$verify)")
                     }
                 } else {
                     val err = p.errorStream.bufferedReader().readText()
