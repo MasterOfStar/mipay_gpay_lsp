@@ -229,25 +229,23 @@ class MainHook : IXposedHookLoadPackage {
 
             Thread.sleep(1000)
 
-            // 方法3: su 命令 (通过启动 Service 在模块进程执行)
+            // 方法3: su 命令 (通过 am startservice 启动模块 Service)
             try {
-                val suIntent = Intent().apply {
-                    setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSuService")
-                    putExtra("component", component)
-                    putExtra("action", action)
-                }
-                context.startService(suIntent)
-                XposedBridge.log("$TAG: 已启动 NfcSuService 执行 su 命令")
-                // 不再在这里显示 Toast，由 Service 处理
+                val amCmd = "am startservice -n com.mipay.gpay.lsp/.NfcSuService --es component \"$component\" --es action \"$action\""
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", amCmd))
+                p.waitFor()
+                val exitCode = p.exitValue()
+                XposedBridge.log("$TAG: am startservice exit=$exitCode")
+                // Service 会处理 Toast，这里直接返回
                 return@Thread
             } catch (e: Throwable) {
-                XposedBridge.log("$TAG: 启动 NfcSuService 失败: ${e.message}")
+                XposedBridge.log("$TAG: am startservice 失败: ${e.message}")
                 lastFailMethod = "方法3: ${e.message}"
+                showToast(context, "$action NFC: $lastFailMethod")
             }
 
             // 全部失败
             XposedBridge.log("$TAG: All methods failed for $action NFC")
-            showToast(context, "$action NFC 失败: $lastFailMethod")
         }.start()
     }
 

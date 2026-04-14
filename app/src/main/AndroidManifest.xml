@@ -25,7 +25,11 @@
         <!-- NFC su 执行服务 -->
         <service
             android:name=".NfcSuService"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.mipay.gpay.lsp.NFC_SU" />
+            </intent-filter>
+        </service>
 
     </application>
 
