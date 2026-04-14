@@ -6,56 +6,92 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class NfcSuReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "MiPayGPay"
         private const val NFC_KEY = "nfc_payment_default_component"
+        private const val LOG_FILE = "/sdcard/gpay_lsp.log"
+
+        fun logToFile(msg: String) {
+            try {
+                val logFile = File(LOG_FILE)
+                val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+                logFile.appendText("$timestamp [NfcSuReceiver] $msg\n")
+            } catch (e: Throwable) {
+                android.util.Log.e(TAG, "logToFile failed: ${e.message}")
+            }
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        val component = intent.getStringExtra("component") ?: return
+        logToFile("=".repeat(50))
+        logToFile("onReceive called")
+        logToFile("intent=$intent")
+        logToFile("intent.action=${intent.action}")
+        logToFile("intent.extras=${intent.extras}")
+
+        val component = intent.getStringExtra("component")
         val action = intent.getStringExtra("action") ?: "操作"
 
-        android.util.Log.i(TAG, "[模块进程] 收到 NFC 设置请求: $component")
+        logToFile("component=$component")
+        logToFile("action=$action")
+
+        if (component == null) {
+            logToFile("ERROR: component is null, returning")
+            return
+        }
 
         Thread {
             try {
+                logToFile("Starting su execution thread")
+
                 // 在模块进程执行 su 命令
                 val cmd = "settings put secure " + NFC_KEY + " " + component
-                android.util.Log.d(TAG, "[模块进程] 执行命令: su -c '$cmd'")
+                logToFile("cmd=$cmd")
+
+                logToFile("Executing: su -c '$cmd'")
                 val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                logToFile("Process started, waiting...")
+
                 p.waitFor()
                 val exitCode = p.exitValue()
-
-                android.util.Log.i(TAG, "[模块进程] su exit=$exitCode")
+                logToFile("su exitCode=$exitCode")
 
                 if (exitCode == 0) {
                     // 验证
                     Thread.sleep(200)
                     val verifyCmd = "settings get secure " + NFC_KEY
-                    android.util.Log.d(TAG, "[模块进程] 验证命令: su -c '$verifyCmd'")
+                    logToFile("verifyCmd=$verifyCmd")
+
                     val verifyP = Runtime.getRuntime().exec(arrayOf("su", "-c", verifyCmd))
                     verifyP.waitFor()
                     val verify = verifyP.inputStream.bufferedReader().readText().trim()
+                    logToFile("verify result=$verify")
 
                     if (verify == component) {
-                        android.util.Log.i(TAG, "[模块进程] $action NFC 成功")
+                        logToFile("SUCCESS: $action NFC to $component")
                         showToast(context, "$action NFC 成功")
                     } else {
-                        android.util.Log.w(TAG, "[模块进程] su exit=0 但验证失败: 期望=$component, 实际=$verify")
-                        showToast(context, "$action NFC: 验证失败 (期望=$component, 实际=$verify)")
+                        logToFile("VERIFY FAILED: expected=$component, actual=$verify")
+                        showToast(context, "$action NFC: 验证失败")
                     }
                 } else {
                     val err = p.errorStream.bufferedReader().readText()
-                    android.util.Log.e(TAG, "[模块进程] su exit=$exitCode, err=$err")
+                    logToFile("ERROR: su exit=$exitCode, err=$err")
                     showToast(context, "$action NFC: su exit=$exitCode")
                 }
             } catch (e: Throwable) {
-                android.util.Log.e(TAG, "[模块进程] su 异常: ${e.message}")
+                logToFile("EXCEPTION: ${e.message}")
+                logToFile(e.stackTraceToString())
                 showToast(context, "$action NFC: ${e.message}")
             }
+            logToFile("=".repeat(50))
         }.start()
     }
 

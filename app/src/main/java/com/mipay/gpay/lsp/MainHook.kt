@@ -1,11 +1,9 @@
 package com.mipay.gpay.lsp
 
 import android.app.Activity
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -13,7 +11,6 @@ import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.UserHandle
 import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
@@ -27,6 +24,10 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainHook : IXposedHookLoadPackage {
 
@@ -37,6 +38,7 @@ class MainHook : IXposedHookLoadPackage {
         private const val INJECT_TAG = "mipay_gpay_btn"
         private const val NFC_KEY = "nfc_payment_default_component"
         private const val ACTION_SET_NFC = "com.mipay.gpay.lsp.SET_NFC"
+        private const val LOG_FILE = "/sdcard/gpay_lsp.log"
 
         // Google Wallet HCE Service
         const val WALLET_NFC_COMPONENT = "com.google.android.gms/com.google.android.gms.tapandpay.hce.service.TpHceService"
@@ -51,9 +53,20 @@ class MainHook : IXposedHookLoadPackage {
   <path fill="#FBBC04" d="M5.8,19.9c-0.6-1.6-0.6-3.4,0-5.1v-3.4H1.4c-1.9,3.7-1.9,8.1,0,11.9L5.8,19.9z"/>
   <path fill="#EA4335" d="M13.2,9.4c1.9,0,3.7,0.7,5.1,2l0,0l3.8-3.8c-2.4-2.2-5.6-3.5-8.8-3.4c-5,0-9.6,2.8-11.8,7.3l4.4,3.4C6.8,11.7,9.8,9.4,13.2,9.4z"/>
 </svg>"""
+
+        fun logToFile(msg: String) {
+            try {
+                val logFile = File(LOG_FILE)
+                val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
+                logFile.appendText("$timestamp [MainHook] $msg\n")
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG: logToFile failed: ${e.message}")
+            }
+        }
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
+        logToFile("handleLoadPackage: ${lpparam.packageName}")
         when (lpparam.packageName) {
             MIPAY_PKG -> setupMiPayHooks(lpparam)
             WALLET_PKG -> setupWalletHooks(lpparam)
@@ -69,10 +82,12 @@ class MainHook : IXposedHookLoadPackage {
             )
             XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    logToFile("DoubleClickActivity.onResume")
                     injectButton(param.thisObject as Activity)
                 }
             })
         } catch (e: Throwable) {
+            logToFile("MiPay hook failed: ${e.message}")
             XposedBridge.log("$TAG: MiPay hook failed: ${e.message}")
         }
     }
@@ -112,21 +127,25 @@ class MainHook : IXposedHookLoadPackage {
     private var restoreTask: Runnable? = null
 
     private fun setupWalletHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
+        logToFile("setupWalletHooks")
         try {
             val activityClass = XposedHelpers.findClass("android.app.Activity", lpparam.classLoader)
 
             XposedHelpers.findAndHookMethod(activityClass, "onStart", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    logToFile("Activity.onStart: ${param.thisObject.javaClass.name}")
                     onForeground(param.thisObject as Activity)
                 }
             })
 
             XposedHelpers.findAndHookMethod(activityClass, "onStop", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    logToFile("Activity.onStop: ${param.thisObject.javaClass.name}")
                     onBackground(param.thisObject as Activity)
                 }
             })
         } catch (e: Throwable) {
+            logToFile("Wallet hook failed: ${e.message}")
             XposedBridge.log("$TAG: Wallet hook failed: ${e.message}")
         }
     }
@@ -136,31 +155,30 @@ class MainHook : IXposedHookLoadPackage {
         restoreTask = null
 
         activeCount++
-        XposedBridge.log("$TAG: onForeground activeCount=$activeCount")
+        logToFile("onForeground activeCount=$activeCount")
         if (activeCount == 1) {
             val current = getNfcDefault(activity)
-            XposedBridge.log("$TAG: Current NFC=$current, target=$WALLET_NFC_COMPONENT")
+            logToFile("onForeground current=$current, target=$WALLET_NFC_COMPONENT")
             if (current != WALLET_NFC_COMPONENT) {
                 savedNfc = current
-                XposedBridge.log("$TAG: savedNfc=$savedNfc, sending broadcast to switch")
-                // 发送广播给模块进程执行 su
+                logToFile("onForeground savedNfc=$savedNfc, sending broadcast")
                 sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
             } else {
-                XposedBridge.log("$TAG: already set to Wallet, skip")
+                logToFile("onForeground already Wallet, skip")
             }
         }
     }
 
     private fun onBackground(activity: Activity) {
         activeCount--
-        XposedBridge.log("$TAG: onBackground activeCount=$activeCount, savedNfc=$savedNfc")
+        logToFile("onBackground activeCount=$activeCount, savedNfc=$savedNfc")
         if (activeCount <= 0) {
             activeCount = 0
             restoreTask = Runnable {
                 savedNfc?.let {
-                    XposedBridge.log("$TAG: restoring NFC to $it")
+                    logToFile("onBackground restore to $it")
                     sendNfcBroadcast(activity, it, "还原")
-                } ?: XposedBridge.log("$TAG: savedNfc is null, skip restore")
+                } ?: logToFile("onBackground savedNfc is null, skip")
                 savedNfc = null
                 restoreTask = null
             }
@@ -170,23 +188,19 @@ class MainHook : IXposedHookLoadPackage {
 
     // Wallet 进程发送广播给模块进程
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
+        logToFile("sendNfcBroadcast: component=$component, action=$action")
         try {
-            XposedBridge.log("$TAG: sendNfcBroadcast component=$component action=$action")
             val intent = Intent(ACTION_SET_NFC).apply {
                 setPackage("com.mipay.gpay.lsp")
                 putExtra("component", component)
                 putExtra("action", action)
             }
+            logToFile("sendNfcBroadcast: intent=$intent, extras=${intent.extras}")
             context.sendBroadcast(intent)
-            XposedBridge.log("$TAG: 已发送 NFC 广播给模块: $component")
+            logToFile("sendNfcBroadcast: broadcast sent")
         } catch (e: Throwable) {
+            logToFile("sendNfcBroadcast error: ${e.message}")
             XposedBridge.log("$TAG: 发送 NFC 广播失败: ${e.message}")
-        }
-    }
-
-    private fun showToast(context: Context, msg: String) {
-        handler.post {
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -194,7 +208,7 @@ class MainHook : IXposedHookLoadPackage {
         return try {
             Settings.Secure.getString(context.contentResolver, NFC_KEY)
         } catch (e: Throwable) {
-            XposedBridge.log("$TAG: getNfcDefault error: ${e.message}")
+            logToFile("getNfcDefault error: ${e.message}")
             null
         }
     }
