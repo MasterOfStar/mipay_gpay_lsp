@@ -248,7 +248,7 @@ object HookEntry : IYukiHookXposedInit {
                 String::class.java,
                 Int::class.javaPrimitiveType
             )
-            putStringForUserMethod.invoke(null, context.contentResolver, NFC_KEY, component, userId)
+            putStringForUserMethod.invoke(null, context.contentResolver, NFC_KEY, component, Integer.valueOf(userId))
             logD(msg = "putStringForUser success")
             return true
         } catch (e: Throwable) {
