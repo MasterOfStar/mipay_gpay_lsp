@@ -136,25 +136,31 @@ class MainHook : IXposedHookLoadPackage {
         restoreTask = null
 
         activeCount++
+        XposedBridge.log("$TAG: onForeground activeCount=$activeCount")
         if (activeCount == 1) {
             val current = getNfcDefault(activity)
-            XposedBridge.log("$TAG: Current NFC=$current")
+            XposedBridge.log("$TAG: Current NFC=$current, target=$WALLET_NFC_COMPONENT")
             if (current != WALLET_NFC_COMPONENT) {
                 savedNfc = current
+                XposedBridge.log("$TAG: savedNfc=$savedNfc, sending broadcast to switch")
                 // 发送广播给模块进程执行 su
                 sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
+            } else {
+                XposedBridge.log("$TAG: already set to Wallet, skip")
             }
         }
     }
 
     private fun onBackground(activity: Activity) {
         activeCount--
+        XposedBridge.log("$TAG: onBackground activeCount=$activeCount, savedNfc=$savedNfc")
         if (activeCount <= 0) {
             activeCount = 0
             restoreTask = Runnable {
                 savedNfc?.let {
+                    XposedBridge.log("$TAG: restoring NFC to $it")
                     sendNfcBroadcast(activity, it, "还原")
-                }
+                } ?: XposedBridge.log("$TAG: savedNfc is null, skip restore")
                 savedNfc = null
                 restoreTask = null
             }
@@ -165,6 +171,7 @@ class MainHook : IXposedHookLoadPackage {
     // Wallet 进程发送广播给模块进程
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
         try {
+            XposedBridge.log("$TAG: sendNfcBroadcast component=$component action=$action")
             val intent = Intent(ACTION_SET_NFC).apply {
                 setPackage("com.mipay.gpay.lsp")
                 putExtra("component", component)
