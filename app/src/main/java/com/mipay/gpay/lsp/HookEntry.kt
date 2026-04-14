@@ -68,7 +68,7 @@ object HookEntry : IYukiHookXposedInit {
     // ════════════════════════ 初始化 ════════════════════════
 
     override fun onInit() = configs {
-        debugLog { tag = TAG }
+        // 调试日志配置
     }
 
     override fun onHook() = encase {
