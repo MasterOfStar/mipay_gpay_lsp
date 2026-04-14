@@ -17,6 +17,11 @@
             android:name="xposedminversion"
             android:value="54" />
 
+        <!-- LSPosed 作用域声明 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
     </application>
 
 </manifest>

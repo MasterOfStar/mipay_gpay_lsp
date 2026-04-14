@@ -138,11 +138,7 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: Current NFC=$current")
             if (current != WALLET_NFC_COMPONENT) {
                 savedNfc = current
-                val ok = setNfcDefault(activity, WALLET_NFC_COMPONENT)
-                XposedBridge.log("$TAG: Set NFC to Wallet: $ok")
-                if (!ok) {
-                    showToast(activity, "切换 NFC 默认应用失败")
-                }
+                setNfcDefaultWithFallback(activity, WALLET_NFC_COMPONENT, "切换")
             }
         }
     }
@@ -153,11 +149,7 @@ class MainHook : IXposedHookLoadPackage {
             activeCount = 0
             restoreTask = Runnable {
                 savedNfc?.let {
-                    val ok = setNfcDefault(activity, it)
-                    XposedBridge.log("$TAG: Restored NFC to $it: $ok")
-                    if (!ok) {
-                        showToast(activity, "还原 NFC 默认应用失败")
-                    }
+                    setNfcDefaultWithFallback(activity, it, "还原")
                 }
                 savedNfc = null
                 restoreTask = null
@@ -172,11 +164,77 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // 使用隐藏 API Settings.Secure.putStringForUser，多重 fallback
+    // 多重 fallback，间隔 1 秒，显示具体失败方案
+    private fun setNfcDefaultWithFallback(context: Context, component: String, action: String) {
+        Thread {
+            var lastFailMethod: String? = null
+            
+            // 方法1: putStringForUser (隐藏 API)
+            try {
+                val userId = XposedHelpers.callStaticMethod(UserHandle::class.java, "myUserId") as Int
+                val result = XposedHelpers.callStaticMethod(
+                    Settings.Secure::class.java,
+                    "putStringForUser",
+                    context.contentResolver,
+                    NFC_KEY,
+                    component,
+                    userId
+                ) as Boolean
+                XposedBridge.log("$TAG: putStringForUser($component, userId=$userId) = $result")
+                if (result) {
+                    XposedBridge.log("$TAG: $action NFC 成功 (方法1: putStringForUser)")
+                    return@Thread
+                }
+                lastFailMethod = "方法1: putStringForUser 返回 false"
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG: putStringForUser failed: ${e.message}")
+                lastFailMethod = "方法1: ${e.message}"
+            }
+
+            Thread.sleep(1000)
+
+            // 方法2: 普通 putString
+            try {
+                val result = Settings.Secure.putString(context.contentResolver, NFC_KEY, component)
+                XposedBridge.log("$TAG: putString($component) = $result")
+                if (result) {
+                    XposedBridge.log("$TAG: $action NFC 成功 (方法2: putString)")
+                    return@Thread
+                }
+                lastFailMethod = "方法2: putString 返回 false"
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG: putString failed: ${e.message}")
+                lastFailMethod = "方法2: ${e.message}"
+            }
+
+            Thread.sleep(1000)
+
+            // 方法3: su 命令
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings put secure $NFC_KEY $component"))
+                p.waitFor()
+                val exitCode = p.exitValue()
+                XposedBridge.log("$TAG: su fallback exit=$exitCode")
+                if (exitCode == 0) {
+                    XposedBridge.log("$TAG: $action NFC 成功 (方法3: su)")
+                    return@Thread
+                }
+                lastFailMethod = "方法3: su exit=$exitCode"
+            } catch (e: Throwable) {
+                XposedBridge.log("$TAG: su failed: ${e.message}")
+                lastFailMethod = "方法3: ${e.message}"
+            }
+
+            // 全部失败，显示 Toast
+            XposedBridge.log("$TAG: All methods failed for $action NFC")
+            showToast(context, "$action NFC 失败: $lastFailMethod")
+        }.start()
+    }
+
+    // 保留同步版本供其他用途
     private fun setNfcDefault(context: Context, component: String): Boolean {
         XposedBridge.log("$TAG: setNfcDefault called: $component")
 
-        // 方法1: putStringForUser (隐藏 API)
         try {
             val userId = XposedHelpers.callStaticMethod(UserHandle::class.java, "myUserId") as Int
             val result = XposedHelpers.callStaticMethod(
@@ -193,7 +251,6 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: putStringForUser failed: ${e.message}")
         }
 
-        // 方法2: 普通 putString (可能仅对当前用户生效)
         try {
             val result = Settings.Secure.putString(context.contentResolver, NFC_KEY, component)
             XposedBridge.log("$TAG: putString($component) = $result")
@@ -202,7 +259,6 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: putString failed: ${e.message}")
         }
 
-        // 方法3: su 命令
         try {
             val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings put secure $NFC_KEY $component"))
             p.waitFor()
@@ -213,7 +269,6 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: su failed: ${e.message}")
         }
 
-        XposedBridge.log("$TAG: All methods failed for setNfcDefault")
         return false
     }
 
