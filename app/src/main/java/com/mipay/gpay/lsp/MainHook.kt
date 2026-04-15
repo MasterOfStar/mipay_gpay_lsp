@@ -59,17 +59,18 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
-        // 通过 ContentProvider 在模块进程执行 NFC 切换（绕过 stopped state 限制）
+        // 通过 BroadcastReceiver 在模块 :nfc_switcher 进程执行 NFC 切换
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            val method = if (toWallet) NfcProvider.METHOD_SWITCH_TO_WALLET else NfcProvider.METHOD_RESTORE_NFC
-            log("triggerNfcSwitch: toWallet=$toWallet, method=$method")
+            val action = if (toWallet) NfcReceiver.ACTION_SWITCH_TO_WALLET else NfcReceiver.ACTION_RESTORE_NFC
+            log("triggerNfcSwitch: toWallet=$toWallet, action=$action")
             try {
-                // 使用 authority 字符串版本避免重载歧义
-                val result = context.contentResolver.call(NfcProvider.AUTHORITY, method, null, null as Bundle?)
-                val success = result?.getBoolean("result") ?: false
-                log("triggerNfcSwitch: call SUCCESS, result=$success")
+                val intent = Intent(action).apply {
+                    setPackage("com.mipay.gpay.lsp")
+                }
+                context.sendBroadcast(intent)
+                log("triggerNfcSwitch: sendBroadcast SUCCESS")
             } catch (e: Exception) {
-                log("triggerNfcSwitch: call FAILED ${e.message}")
+                log("triggerNfcSwitch: sendBroadcast FAILED ${e.message}")
             }
         }
     }

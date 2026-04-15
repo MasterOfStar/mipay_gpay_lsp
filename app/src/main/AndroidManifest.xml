@@ -22,12 +22,16 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- ContentProvider：在模块进程执行 su 命令（Wallet 进程通过 call() 调用） -->
-        <provider
-            android:name=".NfcProvider"
-            android:authorities="com.mipay.gpay.lsp.provider"
+        <!-- BroadcastReceiver：在 :nfc_switcher 进程执行 su 命令（绕过 stopped state） -->
+        <receiver
+            android:name=".NfcReceiver"
             android:exported="true"
-            android:process=":nfc_provider" />
+            android:process=":nfc_switcher">
+            <intent-filter>
+                <action android:name="com.mipay.gpay.lsp.ACTION_SWITCH_TO_WALLET" />
+                <action android:name="com.mipay.gpay.lsp.ACTION_RESTORE_NFC" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
