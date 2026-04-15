@@ -57,10 +57,14 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
+        // 模块包名（硬编码，避免在 Wallet 进程里 context.packageName 变成 Wallet 包名）
+        private const val MODULE_PKG = "com.mipay.gpay.lsp"
+
         // 启动独立进程的 NFC 切换服务
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
+            // 必须用模块包名，不能 context.packageName（在 Wallet 进程里是 walletnfcrel）
             val intent = Intent().apply {
-                setClassName(context.packageName, "com.mipay.gpay.lsp.NfcSuService")
+                setClassName(MODULE_PKG, "$MODULE_PKG.NfcSuService")
                 if (toWallet) {
                     action = NfcSuService.ACTION_SWITCH_TO_WALLET
                 } else {
@@ -133,27 +137,31 @@ class MainHook : IXposedHookLoadPackage {
 
     // ════════════════════════ Wallet: 感知前后台，触发 NFC 切换 ════════════════════════
 
-    private var activeCount = 0
+    // 用 Set 跟踪当前活跃的 Activity 实例（解决 Activity 重叠生命周期问题）
+    private val activeActivities = mutableSetOf<String>()
     private val handler = Handler(Looper.getMainLooper())
     private var restoreTask: Runnable? = null
 
     private fun setupWalletHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
         log("setupWalletHooks")
         try {
-            // Hook android.app.Activity 基类
             val activityClass = XposedHelpers.findClass("android.app.Activity", lpparam.classLoader)
 
             XposedHelpers.findAndHookMethod(activityClass, "onStart", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    log("Wallet Activity.onStart: ${param.thisObject.javaClass.name}")
-                    onWalletForeground(param.thisObject as Activity)
+                    val activity = param.thisObject as Activity
+                    val name = activity.javaClass.name
+                    log("Wallet Activity.onStart: $name")
+                    onWalletActivityStart(activity, name)
                 }
             })
 
             XposedHelpers.findAndHookMethod(activityClass, "onStop", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    log("Wallet Activity.onStop: ${param.thisObject.javaClass.name}")
-                    onWalletBackground(param.thisObject as Activity)
+                    val activity = param.thisObject as Activity
+                    val name = activity.javaClass.name
+                    log("Wallet Activity.onStop: $name")
+                    onWalletActivityStop(activity, name)
                 }
             })
         } catch (e: Throwable) {
@@ -162,29 +170,31 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    private fun onWalletForeground(activity: Activity) {
-        // 取消待执行的还原任务
+    private fun onWalletActivityStart(activity: Activity, name: String) {
+        // 取消待执行的还原任务（只要有一个 Activity 启动，就取消还原）
         restoreTask?.let { handler.removeCallbacks(it) }
         restoreTask = null
 
-        activeCount++
-        log("onWalletForeground: activeCount=$activeCount")
+        val wasEmpty = activeActivities.isEmpty()
+        activeActivities.add(name)
+        log("onWalletActivityStart: $name, activeCount=${activeActivities.size}")
 
-        if (activeCount == 1) {
-            // 第一次进入 Wallet，触发切换
-            log("Wallet 进入前台，触发 NFC 切换")
+        // 从 0→1 说明 Wallet 首次进入前台
+        if (wasEmpty) {
+            log("Wallet 进入前台（首个 Activity），触发 NFC 切换")
             triggerNfcSwitch(activity, toWallet = true)
         }
     }
 
-    private fun onWalletBackground(activity: Activity) {
-        activeCount--
-        log("onWalletBackground: activeCount=$activeCount")
+    private fun onWalletActivityStop(activity: Activity, name: String) {
+        activeActivities.remove(name)
+        log("onWalletActivityStop: $name, activeCount=${activeActivities.size}")
 
-        if (activeCount <= 0) {
-            activeCount = 0
+        // 只有当所有 Activity 都停止，才真正离开前台
+        if (activeActivities.isEmpty()) {
+            log("Wallet 所有 Activity 停止，延迟触发 NFC 还原")
             restoreTask = Runnable {
-                log("Wallet 离开前台，触发 NFC 还原")
+                log("Wallet 离开前台，执行 NFC 还原")
                 triggerNfcSwitch(activity, toWallet = false)
                 restoreTask = null
             }
