@@ -14,7 +14,7 @@ class NfcSuService : Service() {
     companion object {
         private const val TAG = "MiPayGPay"
         private const val NFC_KEY = "nfc_payment_default_component"
-        private const val LOG_FILE = "/sdcard/gpay_lsp.log"
+        private const val LOG_FILE = "/sdcard/Documents/gpay_lsp.log"
 
         fun logToFile(msg: String) {
             try {

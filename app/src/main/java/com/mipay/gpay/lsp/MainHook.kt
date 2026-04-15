@@ -38,7 +38,7 @@ class MainHook : IXposedHookLoadPackage {
         private const val INJECT_TAG = "mipay_gpay_btn"
         private const val NFC_KEY = "nfc_payment_default_component"
         private const val ACTION_SET_NFC = "com.mipay.gpay.lsp.SET_NFC"
-        private const val LOG_FILE = "/sdcard/gpay_lsp.log"
+        private const val LOG_FILE = "/sdcard/Documents/gpay_lsp.log"
 
         // Google Wallet HCE Service
         const val WALLET_NFC_COMPONENT = "com.google.android.gms/com.google.android.gms.tapandpay.hce.service.TpHceService"
