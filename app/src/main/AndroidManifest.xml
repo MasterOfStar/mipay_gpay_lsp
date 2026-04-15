@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 读取使用情况统计（感知前台 App） -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- 前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
-        android:label="MiPay GPay 快捷按钮"
-        android:icon="@mipmap/ic_launcher"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        tools:ignore="MissingApplicationIcon">
 
         <!-- LSPosed 模块声明 -->
         <meta-data
@@ -12,21 +19,25 @@
             android:value="true" />
         <meta-data
             android:name="xposedmodname"
-            android:value="MiPay GPay 快捷按钮" />
+            android:value="MiPay GPay NFC" />
         <meta-data
             android:name="xposedminversion"
-            android:value="54" />
+            android:value="93" />
 
-        <!-- LSPosed 作用域声明 -->
+        <!-- LSPosed 作用域：包含模块自身进程 + MiPay + Wallet -->
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- 主 Activity（无桌面图标，仅用于 LSPosed 显示模块已安装） -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true" />
+        <!-- NFC 切换前台服务（常驻，感知前台 App） -->
+        <service
+            android:name=".NfcAppHookService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="nfc_switching" />
+        </service>
 
     </application>
-
 </manifest>

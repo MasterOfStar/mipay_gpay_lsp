@@ -31,10 +31,6 @@ android {
         release {
             signingConfig = signingConfigs.getByName("mipay")
             isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
         }
     }
 
@@ -49,6 +45,8 @@ android {
 }
 
 dependencies {
+    compileOnly("com.highcapable:yukihookapi:2024.11.1")
     implementation("com.caverock:androidsvg-aar:1.4")
-    compileOnly(files("libs/xposed-api.jar"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.core:core-ktx:1.12.0")
 }
