@@ -3,8 +3,12 @@ package com.mipay.gpay.lsp
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import android.widget.Toast
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -21,18 +25,63 @@ class NfcSuService : Service() {
                 val logFile = File(LOG_FILE)
                 val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
                 logFile.appendText("$timestamp [NfcSuService] $msg\n")
+                Log.d(TAG, "[NfcSuService] $msg")
             } catch (e: Throwable) {
-                android.util.Log.e(TAG, "logToFile failed: ${e.message}")
+                Log.e(TAG, "logToFile failed: ${e.message}")
+            }
+        }
+
+        // 执行 su 命令的健壮方法
+        fun executeSuCommand(cmd: String): Pair<Int, String> {
+            logToFile("executeSuCommand: $cmd")
+            try {
+                // 方法1: 直接 exec
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                val reader = BufferedReader(InputStreamReader(process.inputStream))
+                val output = reader.readText()
+                reader.close()
+                process.waitFor()
+                val exitCode = process.exitValue()
+                logToFile("su result: exitCode=$exitCode, output=$output")
+                return Pair(exitCode, output)
+            } catch (e: Exception) {
+                logToFile("su exec failed: ${e.message}")
+                
+                // 方法2: 使用 shell
+                try {
+                    val process = Runtime.getRuntime().exec("su")
+                    val writer = OutputStreamWriter(process.outputStream)
+                    writer.write(cmd)
+                    writer.flush()
+                    writer.close()
+                    
+                    val reader = BufferedReader(InputStreamReader(process.inputStream))
+                    val output = reader.readText()
+                    reader.close()
+                    
+                    process.waitFor()
+                    val exitCode = process.exitValue()
+                    logToFile("su shell result: exitCode=$exitCode, output=$output")
+                    return Pair(exitCode, output)
+                } catch (e2: Exception) {
+                    logToFile("su shell also failed: ${e2.message}")
+                    return Pair(-1, e2.message ?: "Unknown error")
+                }
             }
         }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        logToFile("=".repeat(50))
+        logToFile("onCreate: Service created in process ${android.os.Process.myPid()}")
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         logToFile("=".repeat(50))
-        logToFile("onStartCommand called")
-        logToFile("intent=$intent")
+        logToFile("onStartCommand: intent=$intent, flags=$flags, startId=$startId")
 
         val component = intent?.getStringExtra("component")
         val action = intent?.getStringExtra("action") ?: "操作"
@@ -46,49 +95,37 @@ class NfcSuService : Service() {
             return START_NOT_STICKY
         }
 
+        // 在后台线程执行
         Thread {
             try {
-                logToFile("Starting su execution in Service")
+                val cmd = "settings put secure $NFC_KEY $component"
+                logToFile("Executing: $cmd")
 
-                // 在模块进程执行 su 命令
-                val cmd = "settings put secure " + NFC_KEY + " " + component
-                logToFile("cmd=$cmd")
-
-                logToFile("Executing: su -c '$cmd'")
-                val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                logToFile("Process started, waiting...")
-
-                p.waitFor()
-                val exitCode = p.exitValue()
-                logToFile("su exitCode=$exitCode")
+                val (exitCode, output) = executeSuCommand(cmd)
 
                 if (exitCode == 0) {
                     // 验证
                     Thread.sleep(200)
-                    val verifyCmd = "settings get secure " + NFC_KEY
-                    logToFile("verifyCmd=$verifyCmd")
+                    val verifyCmd = "settings get secure $NFC_KEY"
+                    val (verifyCode, verifyOutput) = executeSuCommand(verifyCmd)
+                    val result = verifyOutput.trim()
+                    logToFile("Verify: result=$result")
 
-                    val verifyP = Runtime.getRuntime().exec(arrayOf("su", "-c", verifyCmd))
-                    verifyP.waitFor()
-                    val verify = verifyP.inputStream.bufferedReader().readText().trim()
-                    logToFile("verify result=$verify")
-
-                    if (verify == component) {
-                        logToFile("SUCCESS: $action NFC to $component")
-                        showToast("$action NFC 成功")
+                    if (result == component) {
+                        logToFile("SUCCESS: $action NFC -> $component")
+                        showToast("$action 成功")
                     } else {
-                        logToFile("VERIFY FAILED: expected=$component, actual=$verify")
-                        showToast("$action NFC: 验证失败")
+                        logToFile("VERIFY FAILED: expected=$component, actual=$result")
+                        showToast("$action 验证失败")
                     }
                 } else {
-                    val err = p.errorStream.bufferedReader().readText()
-                    logToFile("ERROR: su exit=$exitCode, err=$err")
-                    showToast("$action NFC: su exit=$exitCode")
+                    logToFile("FAILED: exitCode=$exitCode, output=$output")
+                    showToast("$action 失败: $output")
                 }
             } catch (e: Throwable) {
                 logToFile("EXCEPTION: ${e.message}")
                 logToFile(e.stackTraceToString())
-                showToast("$action NFC: ${e.message}")
+                showToast("$action 异常: ${e.message}")
             }
             logToFile("=".repeat(50))
             stopSelf(startId)
@@ -97,9 +134,18 @@ class NfcSuService : Service() {
         return START_NOT_STICKY
     }
 
+    override fun onDestroy() {
+        logToFile("onDestroy")
+        super.onDestroy()
+    }
+
     private fun showToast(msg: String) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+        try {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Throwable) {
+            logToFile("showToast failed: ${e.message}")
         }
     }
 }

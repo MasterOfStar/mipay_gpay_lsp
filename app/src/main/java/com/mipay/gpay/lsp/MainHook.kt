@@ -28,7 +28,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 class MainHook : IXposedHookLoadPackage {
 
@@ -123,7 +122,6 @@ class MainHook : IXposedHookLoadPackage {
     // ════════════════════════ Wallet NFC 管理 (广播机制) ════════════════════════
 
     private var activeCount = 0
-    private var savedNfc: String? = null
     private val handler = Handler(Looper.getMainLooper())
     private var restoreTask: Runnable? = null
 
@@ -158,65 +156,45 @@ class MainHook : IXposedHookLoadPackage {
         activeCount++
         logToFile("onForeground activeCount=$activeCount")
         if (activeCount == 1) {
-            val current = getNfcDefault(activity)
-            logToFile("onForeground current=$current, target=$WALLET_NFC_COMPONENT")
-            if (current != WALLET_NFC_COMPONENT) {
-                savedNfc = current
-                logToFile("onForeground savedNfc=$savedNfc, sending broadcast")
-                sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
-            } else {
-                logToFile("onForeground already Wallet, skip")
-            }
+            // 首次进入前台，切换到 Google Wallet
+            logToFile("onForeground: switching to Wallet")
+            sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
         }
     }
 
     private fun onBackground(activity: Activity) {
         activeCount--
-        logToFile("onBackground activeCount=$activeCount, savedNfc=$savedNfc")
+        logToFile("onBackground activeCount=$activeCount")
         if (activeCount <= 0) {
             activeCount = 0
             restoreTask = Runnable {
-                savedNfc?.let {
-                    logToFile("onBackground restore to $it")
-                    sendNfcBroadcast(activity, it, "还原")
-                } ?: logToFile("onBackground savedNfc is null, skip")
-                savedNfc = null
+                logToFile("onBackground: restoring to MiPay")
+                sendNfcBroadcast(activity, MIPAY_NFC_COMPONENT, "还原")
                 restoreTask = null
             }
             handler.postDelayed(restoreTask!!, 800)
         }
     }
 
+    // MiPay NFC Service
+    const val MIPAY_NFC_COMPONENT = "com.miui.tsmclient/com.miui.tsmclient.hce.service.TsmClientHceService"
+
     // Wallet 进程启动模块 Service（使用显式 Intent）
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
         logToFile("sendNfcBroadcast: component=$component, action=$action")
         try {
-            // 使用显式 ComponentName 指定模块进程中的 Service
             val intent = Intent().apply {
                 setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSuService")
                 putExtra("component", component)
                 putExtra("action", action)
+                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
             }
-            logToFile("Starting NfcSuService with component=${intent.component}")
+            logToFile("Starting NfcSuService")
             context.startService(intent)
-            logToFile("NfcSuService started")
+            logToFile("NfcSuService startService called")
         } catch (e: Throwable) {
             logToFile("startService error: ${e.message}")
             XposedBridge.log("$TAG: 启动 NFC Service 失败: ${e.message}")
-        }
-    }
-
-    private fun getNfcDefault(context: Context): String? {
-        // Android 12+ 限制直接读取，使用 su 命令
-        return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings get secure $NFC_KEY"))
-            p.waitFor(5, TimeUnit.SECONDS)
-            val result = p.inputStream.bufferedReader().readText().trim()
-            logToFile("getNfcDefault via su: $result")
-            result.takeIf { it.isNotEmpty() && it != "null" }
-        } catch (e: Throwable) {
-            logToFile("getNfcDefault error: ${e.message}")
-            null
         }
     }
 }

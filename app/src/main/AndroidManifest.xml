@@ -22,10 +22,21 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
+        <!-- 主 Activity，启动模块进程 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- NFC su 执行 Service (模块进程) -->
         <service
             android:name=".NfcSuService"
-            android:exported="true" />
+            android:exported="true"
+            android:enabled="true" />
 
     </application>
 
