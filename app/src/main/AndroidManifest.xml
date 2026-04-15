@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
-        android:label="MiPay GPay 快捷按钮"
+        android:label="MiPay GPay"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
 
@@ -12,20 +12,21 @@
             android:value="true" />
         <meta-data
             android:name="xposedmodname"
-            android:value="MiPay GPay 快捷按钮" />
+            android:value="MiPay GPay" />
         <meta-data
             android:name="xposedminversion"
             android:value="54" />
 
-        <!-- LSPosed 作用域声明 -->
+        <!-- LSPosed 作用域 -->
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- 主 Activity（无桌面图标，仅用于 LSPosed 显示模块已安装） -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true" />
+        <!-- 独立进程的 NFC 切换服务（su 命令在这里执行） -->
+        <service
+            android:name=".NfcSuService"
+            android:exported="true"
+            android:process=":nfc_switcher" />
 
     </application>
 

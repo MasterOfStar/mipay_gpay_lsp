@@ -31,10 +31,6 @@ android {
         release {
             signingConfig = signingConfigs.getByName("mipay")
             isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
         }
     }
 
