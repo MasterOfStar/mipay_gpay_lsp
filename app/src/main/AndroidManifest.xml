@@ -22,6 +22,16 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
+        <!-- 主 Activity（带桌面图标，用于解除 stopped state） -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- 独立进程的 NFC 切换服务（su 命令在这里执行） -->
         <service
             android:name=".NfcSuService"
