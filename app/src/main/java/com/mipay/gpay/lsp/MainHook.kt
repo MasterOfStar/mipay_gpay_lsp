@@ -186,21 +186,21 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // Wallet 进程发送广播给模块进程
+    // Wallet 进程启动模块 Service
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
         logToFile("sendNfcBroadcast: component=$component, action=$action")
         try {
-            val intent = Intent(ACTION_SET_NFC).apply {
+            val intent = Intent(context, NfcSuService::class.java).apply {
                 setPackage("com.mipay.gpay.lsp")
                 putExtra("component", component)
                 putExtra("action", action)
             }
-            logToFile("sendNfcBroadcast: intent=$intent, extras=${intent.extras}")
-            context.sendBroadcast(intent)
-            logToFile("sendNfcBroadcast: broadcast sent")
+            logToFile("Starting NfcSuService with intent=$intent")
+            context.startService(intent)
+            logToFile("NfcSuService started")
         } catch (e: Throwable) {
-            logToFile("sendNfcBroadcast error: ${e.message}")
-            XposedBridge.log("$TAG: 发送 NFC 广播失败: ${e.message}")
+            logToFile("startService error: ${e.message}")
+            XposedBridge.log("$TAG: 启动 NFC Service 失败: ${e.message}")
         }
     }
 

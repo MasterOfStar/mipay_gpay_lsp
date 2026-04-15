@@ -22,14 +22,10 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- NFC su 执行接收器 (模块进程) -->
-        <receiver
-            android:name=".NfcSuReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.mipay.gpay.lsp.SET_NFC" />
-            </intent-filter>
-        </receiver>
+        <!-- NFC su 执行 Service (模块进程) -->
+        <service
+            android:name=".NfcSuService"
+            android:exported="true" />
 
     </application>
 

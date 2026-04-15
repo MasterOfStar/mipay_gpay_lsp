@@ -1,17 +1,15 @@
 package com.mipay.gpay.lsp
 
-import android.content.BroadcastReceiver
-import android.content.Context
+import android.app.Service
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
+import android.os.IBinder
 import android.widget.Toast
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class NfcSuReceiver : BroadcastReceiver() {
+class NfcSuService : Service() {
 
     companion object {
         private const val TAG = "MiPayGPay"
@@ -22,34 +20,35 @@ class NfcSuReceiver : BroadcastReceiver() {
             try {
                 val logFile = File(LOG_FILE)
                 val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date())
-                logFile.appendText("$timestamp [NfcSuReceiver] $msg\n")
+                logFile.appendText("$timestamp [NfcSuService] $msg\n")
             } catch (e: Throwable) {
                 android.util.Log.e(TAG, "logToFile failed: ${e.message}")
             }
         }
     }
 
-    override fun onReceive(context: Context, intent: Intent) {
-        logToFile("=".repeat(50))
-        logToFile("onReceive called")
-        logToFile("intent=$intent")
-        logToFile("intent.action=${intent.action}")
-        logToFile("intent.extras=${intent.extras}")
+    override fun onBind(intent: Intent?): IBinder? = null
 
-        val component = intent.getStringExtra("component")
-        val action = intent.getStringExtra("action") ?: "操作"
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        logToFile("=".repeat(50))
+        logToFile("onStartCommand called")
+        logToFile("intent=$intent")
+
+        val component = intent?.getStringExtra("component")
+        val action = intent?.getStringExtra("action") ?: "操作"
 
         logToFile("component=$component")
         logToFile("action=$action")
 
         if (component == null) {
-            logToFile("ERROR: component is null, returning")
-            return
+            logToFile("ERROR: component is null, stopping")
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
 
         Thread {
             try {
-                logToFile("Starting su execution thread")
+                logToFile("Starting su execution in Service")
 
                 // 在模块进程执行 su 命令
                 val cmd = "settings put secure " + NFC_KEY + " " + component
@@ -76,28 +75,31 @@ class NfcSuReceiver : BroadcastReceiver() {
 
                     if (verify == component) {
                         logToFile("SUCCESS: $action NFC to $component")
-                        showToast(context, "$action NFC 成功")
+                        showToast("$action NFC 成功")
                     } else {
                         logToFile("VERIFY FAILED: expected=$component, actual=$verify")
-                        showToast(context, "$action NFC: 验证失败")
+                        showToast("$action NFC: 验证失败")
                     }
                 } else {
                     val err = p.errorStream.bufferedReader().readText()
                     logToFile("ERROR: su exit=$exitCode, err=$err")
-                    showToast(context, "$action NFC: su exit=$exitCode")
+                    showToast("$action NFC: su exit=$exitCode")
                 }
             } catch (e: Throwable) {
                 logToFile("EXCEPTION: ${e.message}")
                 logToFile(e.stackTraceToString())
-                showToast(context, "$action NFC: ${e.message}")
+                showToast("$action NFC: ${e.message}")
             }
             logToFile("=".repeat(50))
+            stopSelf(startId)
         }.start()
+
+        return START_NOT_STICKY
     }
 
-    private fun showToast(context: Context, msg: String) {
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    private fun showToast(msg: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
         }
     }
 }
