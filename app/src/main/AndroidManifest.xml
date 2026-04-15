@@ -27,12 +27,6 @@
             android:name=".MainActivity"
             android:exported="true" />
 
-        <!-- NFC su 执行 Service (模块进程) -->
-        <service
-            android:name=".NfcSuService"
-            android:exported="true"
-            android:enabled="true" />
-
     </application>
 
 </manifest>

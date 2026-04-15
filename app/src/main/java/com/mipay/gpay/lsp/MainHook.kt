@@ -11,7 +11,6 @@ import android.graphics.RectF
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
@@ -24,7 +23,9 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -37,8 +38,9 @@ class MainHook : IXposedHookLoadPackage {
         private const val TAG = "MiPayGPay"
         private const val INJECT_TAG = "mipay_gpay_btn"
         private const val NFC_KEY = "nfc_payment_default_component"
-        private const val ACTION_SET_NFC = "com.mipay.gpay.lsp.SET_NFC"
         private const val LOG_FILE = "/sdcard/Documents/gpay_lsp.log"
+        // 保存 NFC 设置的文件路径（/data/local/tmp 任何进程都可读写）
+        private const val SAVED_NFC_FILE = "/data/local/tmp/gpay_saved_nfc.txt"
 
         // Google Wallet HCE Service
         const val WALLET_NFC_COMPONENT = "com.google.android.gms/com.google.android.gms.tapandpay.hce.service.TpHceService"
@@ -63,6 +65,77 @@ class MainHook : IXposedHookLoadPackage {
                 logFile.appendText("$timestamp [MainHook] $msg\n")
             } catch (e: Throwable) {
                 XposedBridge.log("$TAG: logToFile failed: ${e.message}")
+            }
+        }
+
+        // 直接执行 su 命令
+        fun execSu(cmd: String): Pair<Int, String> {
+            logToFile("execSu: $cmd")
+            return try {
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                val output = BufferedReader(InputStreamReader(process.inputStream)).readText()
+                val errOutput = BufferedReader(InputStreamReader(process.errorStream)).readText()
+                process.waitFor()
+                val exitCode = process.exitValue()
+                val result = if (errOutput.isNotEmpty()) "$output\n[STDERR]$errOutput" else output
+                logToFile("execSu result: exitCode=$exitCode, output=$result")
+                Pair(exitCode, result)
+            } catch (e: Exception) {
+                logToFile("execSu failed: ${e.message}")
+                Pair(-1, e.message ?: "Unknown error")
+            }
+        }
+
+        // 读取当前 NFC 设置
+        fun getNfcDefault(): String? {
+            val (exitCode, output) = execSu("settings get secure $NFC_KEY")
+            val result = output.trim()
+            return if (exitCode == 0 && result.isNotEmpty() && result != "null") result else null
+        }
+
+        // 设置 NFC 默认支付应用
+        fun setNfcDefault(component: String): Boolean {
+            val (exitCode, _) = execSu("settings put secure $NFC_KEY $component")
+            return exitCode == 0
+        }
+
+        // 保存当前 NFC 设置到文件
+        fun saveCurrentNfc(): String? {
+            val current = getNfcDefault()
+            if (current != null && current != WALLET_NFC_COMPONENT) {
+                try {
+                    File(SAVED_NFC_FILE).writeText(current)
+                    logToFile("savedNfc: $current")
+                    return current
+                } catch (e: Exception) {
+                    logToFile("saveCurrentNfc failed: ${e.message}")
+                }
+            }
+            return null
+        }
+
+        // 从文件加载保存的 NFC 设置
+        fun loadSavedNfc(): String? {
+            return try {
+                val file = File(SAVED_NFC_FILE)
+                if (file.exists()) {
+                    val saved = file.readText().trim()
+                    logToFile("loadSavedNfc: $saved")
+                    saved.takeIf { it.isNotEmpty() }
+                } else null
+            } catch (e: Exception) {
+                logToFile("loadSavedNfc failed: ${e.message}")
+                null
+            }
+        }
+
+        // 清除保存的 NFC 设置
+        fun clearSavedNfc() {
+            try {
+                File(SAVED_NFC_FILE).delete()
+                logToFile("clearSavedNfc")
+            } catch (e: Exception) {
+                logToFile("clearSavedNfc failed: ${e.message}")
             }
         }
     }
@@ -121,7 +194,7 @@ class MainHook : IXposedHookLoadPackage {
         decor.post { decor.addView(btn) }
     }
 
-    // ════════════════════════ Wallet NFC 管理 (广播机制) ════════════════════════
+    // ════════════════════════ Wallet NFC 管理（直接在 Wallet 进程执行 su）════════════════════════
 
     private var activeCount = 0
     private val handler = Handler(Looper.getMainLooper())
@@ -158,9 +231,32 @@ class MainHook : IXposedHookLoadPackage {
         activeCount++
         logToFile("onForeground activeCount=$activeCount")
         if (activeCount == 1) {
-            // 首次进入前台，切换到 Google Wallet（Service 会保存当前设置）
             logToFile("onForeground: switching to Wallet")
-            sendNfcBroadcast(activity, "切换")
+            // 在 Wallet 进程直接执行 su
+            Thread {
+                try {
+                    // 保存当前 NFC 设置
+                    val current = saveCurrentNfc()
+                    logToFile("switchToWallet: currentNfc=$current")
+
+                    // 切换到 Wallet
+                    if (setNfcDefault(WALLET_NFC_COMPONENT)) {
+                        Thread.sleep(200)
+                        val verify = getNfcDefault()
+                        if (verify == WALLET_NFC_COMPONENT) {
+                            logToFile("switchToWallet: SUCCESS")
+                            showToast(activity, "已切换 NFC 到 Wallet")
+                        } else {
+                            logToFile("switchToWallet: VERIFY FAILED, actual=$verify")
+                        }
+                    } else {
+                        logToFile("switchToWallet: setNfcDefault failed")
+                        showToast(activity, "切换 NFC 失败")
+                    }
+                } catch (e: Throwable) {
+                    logToFile("switchToWallet EXCEPTION: ${e.message}")
+                }
+            }.start()
         }
     }
 
@@ -171,28 +267,48 @@ class MainHook : IXposedHookLoadPackage {
             activeCount = 0
             restoreTask = Runnable {
                 logToFile("onBackground: restoring saved NFC")
-                sendNfcBroadcast(activity, "还原")
+                Thread {
+                    try {
+                        val saved = loadSavedNfc()
+                        if (saved != null) {
+                            // 还原到保存的设置
+                            if (setNfcDefault(saved)) {
+                                Thread.sleep(200)
+                                val verify = getNfcDefault()
+                                if (verify == saved) {
+                                    logToFile("restoreNfc: SUCCESS, restored=$saved")
+                                    showToast(activity, "已还原 NFC")
+                                } else {
+                                    logToFile("restoreNfc: VERIFY FAILED, actual=$verify")
+                                }
+                            } else {
+                                logToFile("restoreNfc: setNfcDefault failed")
+                            }
+                            clearSavedNfc()
+                        } else {
+                            // 没有保存的设置，切换到 MiPay
+                            logToFile("restoreNfc: no saved NFC, fallback to MiPay")
+                            if (setNfcDefault(MIPAY_NFC_COMPONENT)) {
+                                logToFile("restoreNfc: switched to MiPay SUCCESS")
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        logToFile("restoreNfc EXCEPTION: ${e.message}")
+                    }
+                }.start()
                 restoreTask = null
             }
             handler.postDelayed(restoreTask!!, 800)
         }
     }
 
-    // Wallet 进程启动模块 Service（使用显式 Intent）
-    private fun sendNfcBroadcast(context: Context, action: String) {
-        logToFile("sendNfcBroadcast: action=$action")
+    private fun showToast(activity: Activity, msg: String) {
         try {
-            val intent = Intent().apply {
-                setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSuService")
-                putExtra("action", action)
-                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show()
             }
-            logToFile("Starting NfcSuService")
-            context.startService(intent)
-            logToFile("NfcSuService startService called")
         } catch (e: Throwable) {
-            logToFile("startService error: ${e.message}")
-            XposedBridge.log("$TAG: 启动 NFC Service 失败: ${e.message}")
+            logToFile("showToast failed: ${e.message}")
         }
     }
 }
