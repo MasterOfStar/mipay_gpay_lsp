@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:label="MiPay GPay"
         android:icon="@mipmap/ic_launcher"
@@ -22,18 +25,20 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- 前台 Service：在 :nfc_switcher 进程执行 su 命令 -->
+        <!-- Socket Service：在模块进程运行，监听本地端口 -->
         <service
-            android:name=".NfcFgService"
+            android:name=".NfcSocketService"
             android:exported="true"
-            android:foregroundServiceType="dataSync"
-            android:process=":nfc_switcher">
+            android:enabled="true" />
+
+        <!-- 开机广播接收器：启动 Socket Service -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
             <intent-filter>
-                <action android:name="com.mipay.gpay.lsp.ACTION_SWITCH_TO_WALLET" />
-                <action android:name="com.mipay.gpay.lsp.ACTION_RESTORE_NFC" />
-                <action android:name="com.mipay.gpay.lsp.ACTION_START_FOREGROUND" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
-        </service>
+        </receiver>
 
     </application>
 

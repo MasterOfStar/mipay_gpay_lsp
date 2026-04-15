@@ -59,36 +59,39 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
-        // 通过 am startservice 命令强制启动 Service（绕过 stopped state）
+        // 通过 Socket 连接到模块的 NfcSocketService（无需 root）
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            val action = if (toWallet) NfcFgService.ACTION_SWITCH_TO_WALLET else NfcFgService.ACTION_RESTORE_NFC
-            log("triggerNfcSwitch: toWallet=$toWallet, action=$action")
-            try {
-                // 使用 am startservice 命令强制启动（需要 root）
-                val cmd = "am startservice -a $action -n com.mipay.gpay.lsp/.NfcFgService --user 0"
-                log("triggerNfcSwitch: execSu cmd=$cmd")
-                val (code, output) = execSu(cmd)
-                log("triggerNfcSwitch: am startservice result code=$code, out=$output")
-            } catch (e: Exception) {
-                log("triggerNfcSwitch: FAILED ${e.message}")
-            }
+            val cmd = if (toWallet) "SWITCH_TO_WALLET" else "RESTORE_NFC"
+            log("triggerNfcSwitch: toWallet=$toWallet, cmd=$cmd")
+            Thread {
+                try {
+                    java.net.Socket("127.0.0.1", 9876).use { socket ->
+                        socket.soTimeout = 5000
+                        val writer = java.io.PrintWriter(socket.getOutputStream(), true)
+                        val reader = java.io.BufferedReader(java.io.InputStreamReader(socket.getInputStream()))
+                        writer.println(cmd)
+                        val response = reader.readLine()
+                        log("triggerNfcSwitch: response=$response")
+                    }
+                } catch (e: Exception) {
+                    log("triggerNfcSwitch: socket FAILED ${e.message}")
+                    // Socket 失败时尝试启动 Service
+                    tryStartSocketService(context)
+                }
+            }.start()
         }
 
-        // 在 Wallet 进程执行 su 命令（用于启动模块的 Service）
-        fun execSu(cmd: String): Pair<Int, String> {
-            log("execSu: $cmd")
-            return try {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                val output = process.inputStream.bufferedReader().readText()
-                val err = process.errorStream.bufferedReader().readText()
-                process.waitFor()
-                val code = process.exitValue()
-                val result = if (err.isNotEmpty()) "$output\n[STDERR]$err" else output
-                log("execSu result: exitCode=$code")
-                Pair(code, result)
+        // 尝试启动 Socket Service（用 Intent，不需要 root）
+        fun tryStartSocketService(context: Context) {
+            log("tryStartSocketService")
+            try {
+                val intent = android.content.Intent().apply {
+                    setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSocketService")
+                }
+                context.startService(intent)
+                log("tryStartSocketService: startService called")
             } catch (e: Exception) {
-                log("execSu failed: ${e.message}")
-                Pair(-1, e.message ?: "Unknown")
+                log("tryStartSocketService: failed ${e.message}")
             }
         }
     }
