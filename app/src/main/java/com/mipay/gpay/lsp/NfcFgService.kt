@@ -1,5 +1,6 @@
 package com.mipay.gpay.lsp
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -138,16 +138,28 @@ class NfcFgService : Service() {
         return START_STICKY
     }
 
+    @Suppress("DEPRECATION")
     private fun startForegroundInternal() {
         log("startForegroundInternal")
         try {
             createNotificationChannel()
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("NFC Switcher")
-                .setContentText("Running in background")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setOngoing(true)
-                .build()
+
+            val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, CHANNEL_ID)
+                    .setContentTitle("NFC Switcher")
+                    .setContentText("Running in background")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setOngoing(true)
+                    .build()
+            } else {
+                Notification.Builder(this)
+                    .setContentTitle("NFC Switcher")
+                    .setContentText("Running in background")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setOngoing(true)
+                    .build()
+            }
+
             startForeground(NOTIF_ID, notification)
             log("startForeground: success")
         } catch (e: Exception) {
