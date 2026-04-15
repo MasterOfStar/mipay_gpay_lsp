@@ -42,6 +42,8 @@ class MainHook : IXposedHookLoadPackage {
 
         // Google Wallet HCE Service
         const val WALLET_NFC_COMPONENT = "com.google.android.gms/com.google.android.gms.tapandpay.hce.service.TpHceService"
+        // MiPay HCE Service
+        const val MIPAY_NFC_COMPONENT = "com.miui.tsmclient/com.miui.tsmclient.hce.service.TsmClientHceService"
 
         private const val GOOGLE_PAY_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="38.1" viewBox="0 0 80 38.1">
@@ -175,9 +177,6 @@ class MainHook : IXposedHookLoadPackage {
             handler.postDelayed(restoreTask!!, 800)
         }
     }
-
-    // MiPay NFC Service
-    const val MIPAY_NFC_COMPONENT = "com.miui.tsmclient/com.miui.tsmclient.hce.service.TsmClientHceService"
 
     // Wallet 进程启动模块 Service（使用显式 Intent）
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
