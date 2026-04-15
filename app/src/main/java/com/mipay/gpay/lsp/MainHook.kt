@@ -38,6 +38,10 @@ class MainHook : IXposedHookLoadPackage {
         private const val TAG = "MiPayGPay"
         private const val INJECT_TAG = "mipay_gpay_btn"
         private const val LOG_FILE = "/sdcard/Documents/gpay_lsp.log"
+        
+        // NFC 广播 Action
+        const val ACTION_WALLET_FOREGROUND = "com.mipay.gpay.lsp.WALLET_FOREGROUND"
+        const val ACTION_WALLET_BACKGROUND = "com.mipay.gpay.lsp.WALLET_BACKGROUND"
 
         private const val GOOGLE_PAY_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="38.1" viewBox="0 0 80 38.1">
@@ -59,39 +63,18 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
-        // 通过 Socket 连接到模块的 NfcSocketService（无需 root）
+        // Wallet 进程发送广播通知 MiPay 切换 NFC
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            val cmd = if (toWallet) "SWITCH_TO_WALLET" else "RESTORE_NFC"
-            log("triggerNfcSwitch: toWallet=$toWallet, cmd=$cmd")
-            Thread {
-                try {
-                    java.net.Socket("127.0.0.1", 9876).use { socket ->
-                        socket.soTimeout = 5000
-                        val writer = java.io.PrintWriter(socket.getOutputStream(), true)
-                        val reader = java.io.BufferedReader(java.io.InputStreamReader(socket.getInputStream()))
-                        writer.println(cmd)
-                        val response = reader.readLine()
-                        log("triggerNfcSwitch: response=$response")
-                    }
-                } catch (e: Exception) {
-                    log("triggerNfcSwitch: socket FAILED ${e.message}")
-                    // Socket 失败时尝试启动 Service
-                    tryStartSocketService(context)
-                }
-            }.start()
-        }
-
-        // 尝试启动 Socket Service（用 Intent，不需要 root）
-        fun tryStartSocketService(context: Context) {
-            log("tryStartSocketService")
+            val action = if (toWallet) ACTION_WALLET_FOREGROUND else ACTION_WALLET_BACKGROUND
+            log("triggerNfcSwitch: toWallet=$toWallet, action=$action")
             try {
-                val intent = android.content.Intent().apply {
-                    setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSocketService")
+                val intent = android.content.Intent(action).apply {
+                    setPackage(MIPAY_PKG) // 显式指定 MiPay 包名
                 }
-                context.startService(intent)
-                log("tryStartSocketService: startService called")
+                context.sendBroadcast(intent)
+                log("triggerNfcSwitch: broadcast sent")
             } catch (e: Exception) {
-                log("tryStartSocketService: failed ${e.message}")
+                log("triggerNfcSwitch: broadcast failed ${e.message}")
             }
         }
     }
@@ -104,10 +87,25 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // ════════════════════════ MiPay: 注入 GPay 按钮 ════════════════════════
+    // ════════════════════════ MiPay: 注入 GPay 按钮 + NFC 切换 ════════════════════════
+
+    private var nfcReceiver: NfcSwitchReceiver? = null
 
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
         try {
+            // Hook Application.onCreate 来注册广播接收器
+            val appClass = XposedHelpers.findClass(
+                "android.app.Application", lpparam.classLoader
+            )
+            XposedHelpers.findAndHookMethod(appClass, "onCreate", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val app = param.thisObject as android.app.Application
+                    log("MiPay Application.onCreate, registering NFC receiver")
+                    registerNfcReceiver(app)
+                }
+            })
+
+            // Hook DoubleClickActivity 注入按钮
             val targetClass = XposedHelpers.findClass(
                 "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
             )
@@ -121,6 +119,18 @@ class MainHook : IXposedHookLoadPackage {
             log("MiPay hook failed: ${e.message}")
             XposedBridge.log("$TAG: MiPay hook failed: ${e.message}")
         }
+    }
+
+    private fun registerNfcReceiver(context: Context) {
+        if (nfcReceiver != null) return // 避免重复注册
+        
+        nfcReceiver = NfcSwitchReceiver()
+        val filter = android.content.IntentFilter().apply {
+            addAction(ACTION_WALLET_FOREGROUND)
+            addAction(ACTION_WALLET_BACKGROUND)
+        }
+        context.registerReceiver(nfcReceiver, filter)
+        log("NFC receiver registered")
     }
 
     private fun injectButton(activity: Activity) {
