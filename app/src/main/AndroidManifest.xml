@@ -22,15 +22,10 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- 主 Activity，启动模块进程 -->
+        <!-- 主 Activity（无桌面图标，仅用于 LSPosed 显示模块已安装） -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="true" />
 
         <!-- NFC su 执行 Service (模块进程) -->
         <service

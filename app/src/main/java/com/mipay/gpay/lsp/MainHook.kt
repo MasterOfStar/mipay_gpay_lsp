@@ -158,9 +158,9 @@ class MainHook : IXposedHookLoadPackage {
         activeCount++
         logToFile("onForeground activeCount=$activeCount")
         if (activeCount == 1) {
-            // 首次进入前台，切换到 Google Wallet
+            // 首次进入前台，切换到 Google Wallet（Service 会保存当前设置）
             logToFile("onForeground: switching to Wallet")
-            sendNfcBroadcast(activity, WALLET_NFC_COMPONENT, "切换")
+            sendNfcBroadcast(activity, "切换")
         }
     }
 
@@ -170,8 +170,8 @@ class MainHook : IXposedHookLoadPackage {
         if (activeCount <= 0) {
             activeCount = 0
             restoreTask = Runnable {
-                logToFile("onBackground: restoring to MiPay")
-                sendNfcBroadcast(activity, MIPAY_NFC_COMPONENT, "还原")
+                logToFile("onBackground: restoring saved NFC")
+                sendNfcBroadcast(activity, "还原")
                 restoreTask = null
             }
             handler.postDelayed(restoreTask!!, 800)
@@ -179,12 +179,11 @@ class MainHook : IXposedHookLoadPackage {
     }
 
     // Wallet 进程启动模块 Service（使用显式 Intent）
-    private fun sendNfcBroadcast(context: Context, component: String, action: String) {
-        logToFile("sendNfcBroadcast: component=$component, action=$action")
+    private fun sendNfcBroadcast(context: Context, action: String) {
+        logToFile("sendNfcBroadcast: action=$action")
         try {
             val intent = Intent().apply {
                 setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSuService")
-                putExtra("component", component)
                 putExtra("action", action)
                 addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
             }
