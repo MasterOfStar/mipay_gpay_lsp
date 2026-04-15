@@ -22,16 +22,18 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
-        <!-- BroadcastReceiver：在 :nfc_switcher 进程执行 su 命令（绕过 stopped state） -->
-        <receiver
-            android:name=".NfcReceiver"
+        <!-- 前台 Service：在 :nfc_switcher 进程执行 su 命令 -->
+        <service
+            android:name=".NfcFgService"
             android:exported="true"
+            android:foregroundServiceType="dataSync"
             android:process=":nfc_switcher">
             <intent-filter>
                 <action android:name="com.mipay.gpay.lsp.ACTION_SWITCH_TO_WALLET" />
                 <action android:name="com.mipay.gpay.lsp.ACTION_RESTORE_NFC" />
+                <action android:name="com.mipay.gpay.lsp.ACTION_START_FOREGROUND" />
             </intent-filter>
-        </receiver>
+        </service>
 
     </application>
 

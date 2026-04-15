@@ -59,18 +59,36 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
-        // 通过 BroadcastReceiver 在模块 :nfc_switcher 进程执行 NFC 切换
+        // 通过 am startservice 命令强制启动 Service（绕过 stopped state）
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            val action = if (toWallet) NfcReceiver.ACTION_SWITCH_TO_WALLET else NfcReceiver.ACTION_RESTORE_NFC
+            val action = if (toWallet) NfcFgService.ACTION_SWITCH_TO_WALLET else NfcFgService.ACTION_RESTORE_NFC
             log("triggerNfcSwitch: toWallet=$toWallet, action=$action")
             try {
-                val intent = Intent(action).apply {
-                    setPackage("com.mipay.gpay.lsp")
-                }
-                context.sendBroadcast(intent)
-                log("triggerNfcSwitch: sendBroadcast SUCCESS")
+                // 使用 am startservice 命令强制启动（需要 root）
+                val cmd = "am startservice -a $action -n com.mipay.gpay.lsp/.NfcFgService --user 0"
+                log("triggerNfcSwitch: execSu cmd=$cmd")
+                val (code, output) = execSu(cmd)
+                log("triggerNfcSwitch: am startservice result code=$code, out=$output")
             } catch (e: Exception) {
-                log("triggerNfcSwitch: sendBroadcast FAILED ${e.message}")
+                log("triggerNfcSwitch: FAILED ${e.message}")
+            }
+        }
+
+        // 在 Wallet 进程执行 su 命令（用于启动模块的 Service）
+        fun execSu(cmd: String): Pair<Int, String> {
+            log("execSu: $cmd")
+            return try {
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                val output = process.inputStream.bufferedReader().readText()
+                val err = process.errorStream.bufferedReader().readText()
+                process.waitFor()
+                val code = process.exitValue()
+                val result = if (err.isNotEmpty()) "$output\n[STDERR]$err" else output
+                log("execSu result: exitCode=$code")
+                Pair(code, result)
+            } catch (e: Exception) {
+                log("execSu failed: ${e.message}")
+                Pair(-1, e.message ?: "Unknown")
             }
         }
     }
