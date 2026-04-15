@@ -57,26 +57,17 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
-        // 模块包名（硬编码，避免在 Wallet 进程里 context.packageName 变成 Wallet 包名）
-        private const val MODULE_PKG = "com.mipay.gpay.lsp"
-
-        // 启动独立进程的 NFC 切换服务
+        // 通过 ContentProvider 在模块进程执行 NFC 切换（绕过 stopped state 限制）
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            // 必须用模块包名，不能 context.packageName（在 Wallet 进程里是 walletnfcrel）
-            val intent = Intent().apply {
-                setClassName(MODULE_PKG, "$MODULE_PKG.NfcSuService")
-                if (toWallet) {
-                    action = NfcSuService.ACTION_SWITCH_TO_WALLET
-                } else {
-                    action = NfcSuService.ACTION_RESTORE
-                }
-            }
-            log("triggerNfcSwitch: toWallet=$toWallet, intent=$intent")
+            val uri = Uri.parse("content://${NfcProvider.AUTHORITY}")
+            val method = if (toWallet) NfcProvider.METHOD_SWITCH_TO_WALLET else NfcProvider.METHOD_RESTORE_NFC
+            log("triggerNfcSwitch: toWallet=$toWallet, uri=$uri, method=$method")
             try {
-                context.startService(intent)
-                log("triggerNfcSwitch: startService SUCCESS")
+                val result = context.contentResolver.call(uri, method, null, null)
+                val success = result?.getBoolean("result") ?: false
+                log("triggerNfcSwitch: call SUCCESS, result=$success")
             } catch (e: Exception) {
-                log("triggerNfcSwitch: startService FAILED ${e.message}")
+                log("triggerNfcSwitch: call FAILED ${e.message}")
             }
         }
     }
