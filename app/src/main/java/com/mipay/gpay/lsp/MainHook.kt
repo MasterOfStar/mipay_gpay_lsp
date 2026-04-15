@@ -28,6 +28,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class MainHook : IXposedHookLoadPackage {
 
@@ -186,16 +187,17 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // Wallet 进程启动模块 Service
+    // Wallet 进程启动模块 Service（使用显式 Intent）
     private fun sendNfcBroadcast(context: Context, component: String, action: String) {
         logToFile("sendNfcBroadcast: component=$component, action=$action")
         try {
-            val intent = Intent(context, NfcSuService::class.java).apply {
-                setPackage("com.mipay.gpay.lsp")
+            // 使用显式 ComponentName 指定模块进程中的 Service
+            val intent = Intent().apply {
+                setClassName("com.mipay.gpay.lsp", "com.mipay.gpay.lsp.NfcSuService")
                 putExtra("component", component)
                 putExtra("action", action)
             }
-            logToFile("Starting NfcSuService with intent=$intent")
+            logToFile("Starting NfcSuService with component=${intent.component}")
             context.startService(intent)
             logToFile("NfcSuService started")
         } catch (e: Throwable) {
@@ -205,8 +207,13 @@ class MainHook : IXposedHookLoadPackage {
     }
 
     private fun getNfcDefault(context: Context): String? {
+        // Android 12+ 限制直接读取，使用 su 命令
         return try {
-            Settings.Secure.getString(context.contentResolver, NFC_KEY)
+            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "settings get secure $NFC_KEY"))
+            p.waitFor(5, TimeUnit.SECONDS)
+            val result = p.inputStream.bufferedReader().readText().trim()
+            logToFile("getNfcDefault via su: $result")
+            result.takeIf { it.isNotEmpty() && it != "null" }
         } catch (e: Throwable) {
             logToFile("getNfcDefault error: ${e.message}")
             null
