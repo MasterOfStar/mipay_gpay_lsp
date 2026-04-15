@@ -8,7 +8,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -59,11 +61,11 @@ class MainHook : IXposedHookLoadPackage {
 
         // 通过 ContentProvider 在模块进程执行 NFC 切换（绕过 stopped state 限制）
         fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            val uri = Uri.parse("content://${NfcProvider.AUTHORITY}")
             val method = if (toWallet) NfcProvider.METHOD_SWITCH_TO_WALLET else NfcProvider.METHOD_RESTORE_NFC
-            log("triggerNfcSwitch: toWallet=$toWallet, uri=$uri, method=$method")
+            log("triggerNfcSwitch: toWallet=$toWallet, method=$method")
             try {
-                val result = context.contentResolver.call(uri, method, null, null)
+                // 使用 authority 字符串版本避免重载歧义
+                val result = context.contentResolver.call(NfcProvider.AUTHORITY, method, null, null as Bundle?)
                 val success = result?.getBoolean("result") ?: false
                 log("triggerNfcSwitch: call SUCCESS, result=$success")
             } catch (e: Exception) {
