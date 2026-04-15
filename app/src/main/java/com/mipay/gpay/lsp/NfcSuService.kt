@@ -20,7 +20,7 @@ class NfcSuService : Service() {
         private const val TAG = "MiPayGPay"
         private const val NFC_KEY = "nfc_payment_default_component"
         private const val LOG_FILE = "/sdcard/Documents/gpay_lsp.log"
-        private const val SAVED_NFC_FILE = "/sdcard/Documents/gpay_lsp_saved_nfc.txt"
+        private const val SAVED_NFC_FILE = "saved_nfc.txt"
 
         fun logToFile(msg: String) {
             try {
@@ -67,11 +67,11 @@ class NfcSuService : Service() {
         }
 
         // 保存当前 NFC 设置
-        fun saveCurrentNfc(): String? {
+        fun saveCurrentNfc(context: Context): String? {
             val current = getNfcDefault()
             if (current != null && current != MainHook.WALLET_NFC_COMPONENT) {
                 try {
-                    File(SAVED_NFC_FILE).writeText(current)
+                    context.filesDir.resolve(SAVED_NFC_FILE).writeText(current)
                     logToFile("savedNfc: $current")
                     return current
                 } catch (e: Exception) {
@@ -82,9 +82,9 @@ class NfcSuService : Service() {
         }
 
         // 读取保存的 NFC 设置
-        fun loadSavedNfc(): String? {
+        fun loadSavedNfc(context: Context): String? {
             return try {
-                val file = File(SAVED_NFC_FILE)
+                val file = context.filesDir.resolve(SAVED_NFC_FILE)
                 if (file.exists()) {
                     val saved = file.readText().trim()
                     logToFile("loadSavedNfc: $saved")
@@ -97,9 +97,9 @@ class NfcSuService : Service() {
         }
 
         // 清除保存的 NFC 设置
-        fun clearSavedNfc() {
+        fun clearSavedNfc(context: Context) {
             try {
-                File(SAVED_NFC_FILE).delete()
+                context.filesDir.resolve(SAVED_NFC_FILE).delete()
                 logToFile("clearSavedNfc")
             } catch (e: Exception) {
                 logToFile("clearSavedNfc failed: ${e.message}")
@@ -130,7 +130,7 @@ class NfcSuService : Service() {
                 when (action) {
                     "切换" -> {
                         // 切换到 Wallet，先保存当前设置
-                        val currentNfc = saveCurrentNfc()
+                        val currentNfc = saveCurrentNfc(applicationContext)
                         logToFile("currentNfc before switch: $currentNfc")
                         
                         if (setNfcDefault(MainHook.WALLET_NFC_COMPONENT)) {
@@ -151,7 +151,7 @@ class NfcSuService : Service() {
                     }
                     "还原" -> {
                         // 还原到保存的设置
-                        val savedNfc = loadSavedNfc()
+                        val savedNfc = loadSavedNfc(applicationContext)
                         logToFile("savedNfc to restore: $savedNfc")
                         
                         if (savedNfc != null) {
@@ -169,7 +169,7 @@ class NfcSuService : Service() {
                                 logToFile("FAILED: setNfcDefault failed")
                                 showToast("还原失败")
                             }
-                            clearSavedNfc()
+                            clearSavedNfc(applicationContext)
                         } else {
                             // 没有保存的设置，切换到 MiPay
                             logToFile("No saved NFC, fallback to MiPay")
