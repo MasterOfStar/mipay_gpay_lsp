@@ -16,6 +16,9 @@
             android:name="xposedmodname"
             android:value="MiPay GPay" />
         <meta-data
+            android:name="xposeddescription"
+            android:value="为Mipay添加Google Pay的跳转按钮，并自动设置默认付款应用" />
+        <meta-data
             android:name="xposedminversion"
             android:value="54" />
 
