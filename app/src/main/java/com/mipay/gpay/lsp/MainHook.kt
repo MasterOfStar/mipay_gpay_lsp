@@ -140,7 +140,13 @@ class MainHook : IXposedHookLoadPackage {
                     val activity = param.thisObject as Activity
                     log("DoubleClickActivity.onResume - 最终确认 NFC = MiPay")
                     setNfcComponent(activity, MIPAY_COMPONENT)
-                    injectButton(activity)
+                    try {
+                        log("开始注入按钮...")
+                        injectButton(activity)
+                        log("按钮注入完成")
+                    } catch (e: Throwable) {
+                        log("按钮注入失败: ${e.message}")
+                    }
                 }
             })
             
@@ -154,30 +160,49 @@ class MainHook : IXposedHookLoadPackage {
     }
 
     private fun injectButton(activity: Activity) {
-        val decor = activity.window.decorView as? ViewGroup ?: return
-        if (decor.findViewWithTag<View>(INJECT_TAG) != null) return
+        log("injectButton 开始")
+        val decor = activity.window.decorView as? ViewGroup
+        if (decor == null) {
+            log("decorView 为空，无法注入按钮")
+            return
+        }
+        log("decorView 获取成功")
+        
+        if (decor.findViewWithTag<View>(INJECT_TAG) != null) {
+            log("按钮已存在，跳过注入")
+            return
+        }
+        log("按钮不存在，准备创建")
 
         val btn = GooglePayButtonView(decor.context).apply {
             tag = INJECT_TAG
             setSvgString(GOOGLE_PAY_SVG)
         }
+        log("按钮创建成功")
 
         val density = decor.context.resources.displayMetrics.density
         val w = (104 * density).toInt()
         val h = (58 * density).toInt()
+        log("密度=$density, 按钮尺寸=${w}x${h}")
 
         btn.post {
             val pw = decor.width
             val ph = decor.height
+            log("decor 尺寸=${pw}x${ph}")
             if (pw > 0 && ph > 0) {
                 btn.layoutParams = FrameLayout.LayoutParams(w, h).apply {
                     leftMargin = pw - w - (10 * density).toInt()
                     topMargin = ph - h - (100 * density).toInt()
                 }
+                log("按钮布局参数设置完成")
             }
         }
 
-        decor.post { decor.addView(btn) }
+        decor.post { 
+            decor.addView(btn) 
+            log("按钮已添加到 decorView")
+        }
+        log("injectButton 结束")
     }
 }
 
