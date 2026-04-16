@@ -2,17 +2,14 @@ package com.mipay.gpay.lsp
 
 import android.app.Activity
 import android.content.ComponentName
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
-import android.net.Uri
 import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
@@ -39,9 +36,12 @@ class MainHook : IXposedHookLoadPackage {
         private const val INJECT_TAG = "mipay_gpay_btn"
         private const val LOG_FILE = "/sdcard/Documents/gpay_lsp.log"
         
-        // NFC 广播 Action
-        const val ACTION_WALLET_FOREGROUND = "com.mipay.gpay.lsp.WALLET_FOREGROUND"
-        const val ACTION_WALLET_BACKGROUND = "com.mipay.gpay.lsp.WALLET_BACKGROUND"
+        // NFC 设置 Key
+        private const val KEY_NFC_PAYMENT = "nfc_payment_default_component"
+        // Google Wallet 组件
+        private const val WALLET_COMPONENT = "com.google.android.apps.walletnfcrel/com.google.android.apps.wallet.tapandpay.quickaccesswallet.WalletQuickAccessWalletService"
+        // MiPay 组件（默认）
+        private const val MIPAY_COMPONENT = "com.miui.tsmclient/com.miui.tsmclient.service.NfcService"
 
         private const val GOOGLE_PAY_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="38.1" viewBox="0 0 80 38.1">
@@ -63,74 +63,87 @@ class MainHook : IXposedHookLoadPackage {
             }
         }
 
-        // Wallet 进程发送广播通知 MiPay 切换 NFC
-        fun triggerNfcSwitch(context: Context, toWallet: Boolean) {
-            val action = if (toWallet) ACTION_WALLET_FOREGROUND else ACTION_WALLET_BACKGROUND
-            log("triggerNfcSwitch: toWallet=$toWallet, action=$action")
-            try {
-                val intent = android.content.Intent(action).apply {
-                    setPackage(MIPAY_PKG) // 显式指定 MiPay 包名
-                }
-                context.sendBroadcast(intent)
-                log("triggerNfcSwitch: broadcast sent")
-            } catch (e: Exception) {
-                log("triggerNfcSwitch: broadcast failed ${e.message}")
-            }
-        }
+
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         log("handleLoadPackage: ${lpparam.packageName}")
-        when (lpparam.packageName) {
-            MIPAY_PKG -> setupMiPayHooks(lpparam)
-            WALLET_PKG -> setupWalletHooks(lpparam)
+        // 极简方案：只 hook MiPay，Wallet 完全不需要
+        if (lpparam.packageName == MIPAY_PKG) {
+            setupMiPayHooks(lpparam)
         }
     }
 
-    // ════════════════════════ MiPay: 注入 GPay 按钮 + NFC 切换 ════════════════════════
+    // ════════════════════════ MiPay: 注入 GPay 按钮 + NFC 切换（极简方案）════════════════════════
 
-    private var nfcReceiver: NfcSwitchReceiver? = null
+    // 保存原始 NFC 组件（静态变量，进程内共享）
+    private var savedNfcComponent: String? = null
 
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
         try {
-            // Hook Application.onCreate 来注册广播接收器
-            val appClass = XposedHelpers.findClass(
-                "android.app.Application", lpparam.classLoader
-            )
-            XposedHelpers.findAndHookMethod(appClass, "onCreate", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val app = param.thisObject as android.app.Application
-                    log("MiPay Application.onCreate, registering NFC receiver")
-                    registerNfcReceiver(app)
-                }
-            })
-
-            // Hook DoubleClickActivity 注入按钮
+            // Hook DoubleClickActivity 的 onResume 和 onPause
             val targetClass = XposedHelpers.findClass(
                 "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
             )
+            
+            // onResume: MiPay 显示时，确保 NFC = MiPay
             XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    log("MiPay DoubleClickActivity.onResume")
-                    injectButton(param.thisObject as Activity)
+                    val activity = param.thisObject as Activity
+                    log("DoubleClickActivity.onResume")
+                    // 如果之前切换到 Wallet 时保存了原始值，现在恢复
+                    if (savedNfcComponent != null) {
+                        log("恢复原始 NFC: $savedNfcComponent")
+                        setNfcComponent(activity, savedNfcComponent!!)
+                        savedNfcComponent = null
+                    } else {
+                        // 首次打开 MiPay，设置 NFC = MiPay
+                        log("设置 NFC = MiPay")
+                        setNfcComponent(activity, MIPAY_COMPONENT)
+                    }
+                    injectButton(activity)
                 }
             })
+            
+            // onPause: MiPay 离开时，注入的按钮点击事件会切换 NFC 并启动 Wallet
+            // 所以这里不需要额外处理 NFC
+            XposedHelpers.findAndHookMethod(targetClass, "onPause", object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    log("DoubleClickActivity.onPause")
+                }
+            })
+            
         } catch (e: Throwable) {
             log("MiPay hook failed: ${e.message}")
             XposedBridge.log("$TAG: MiPay hook failed: ${e.message}")
         }
     }
 
-    private fun registerNfcReceiver(context: Context) {
-        if (nfcReceiver != null) return // 避免重复注册
-        
-        nfcReceiver = NfcSwitchReceiver()
-        val filter = android.content.IntentFilter().apply {
-            addAction(ACTION_WALLET_FOREGROUND)
-            addAction(ACTION_WALLET_BACKGROUND)
+    /**
+     * 设置 NFC 默认支付方式
+     * MiPay 有系统权限，直接反射调用 Settings.Secure.putStringForUser
+     */
+    private fun setNfcComponent(context: Context, component: String) {
+        setNfcComponentStatic(context, component)
+    }
+
+    // 静态方法，供 GooglePayButtonView 调用
+    fun setNfcComponentStatic(context: Context, component: String) {
+        try {
+            val cr = context.contentResolver
+            val cls = Class.forName("android.provider.Settings\$Secure")
+            val method = cls.getDeclaredMethod(
+                "putStringForUser",
+                ContentResolver::class.java,
+                String::class.java,
+                String::class.java,
+                Int::class.java
+            )
+            val result = method.invoke(null, cr, KEY_NFC_PAYMENT, component, -2) as Boolean
+            log("setNfcComponent: $component, result=$result")
+        } catch (e: Exception) {
+            log("setNfcComponent failed: ${e.message}")
         }
-        context.registerReceiver(nfcReceiver, filter)
-        log("NFC receiver registered")
     }
 
     private fun injectButton(activity: Activity) {
@@ -160,72 +173,7 @@ class MainHook : IXposedHookLoadPackage {
         decor.post { decor.addView(btn) }
     }
 
-    // ════════════════════════ Wallet: 感知前后台，触发 NFC 切换 ════════════════════════
 
-    // 用 Set 跟踪当前活跃的 Activity 实例（解决 Activity 重叠生命周期问题）
-    private val activeActivities = mutableSetOf<String>()
-    private val handler = Handler(Looper.getMainLooper())
-    private var restoreTask: Runnable? = null
-
-    private fun setupWalletHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
-        log("setupWalletHooks")
-        try {
-            val activityClass = XposedHelpers.findClass("android.app.Activity", lpparam.classLoader)
-
-            XposedHelpers.findAndHookMethod(activityClass, "onStart", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val activity = param.thisObject as Activity
-                    val name = activity.javaClass.name
-                    log("Wallet Activity.onStart: $name")
-                    onWalletActivityStart(activity, name)
-                }
-            })
-
-            XposedHelpers.findAndHookMethod(activityClass, "onStop", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val activity = param.thisObject as Activity
-                    val name = activity.javaClass.name
-                    log("Wallet Activity.onStop: $name")
-                    onWalletActivityStop(activity, name)
-                }
-            })
-        } catch (e: Throwable) {
-            log("Wallet hook failed: ${e.message}")
-            XposedBridge.log("$TAG: Wallet hook failed: ${e.message}")
-        }
-    }
-
-    private fun onWalletActivityStart(activity: Activity, name: String) {
-        // 取消待执行的还原任务（只要有一个 Activity 启动，就取消还原）
-        restoreTask?.let { handler.removeCallbacks(it) }
-        restoreTask = null
-
-        val wasEmpty = activeActivities.isEmpty()
-        activeActivities.add(name)
-        log("onWalletActivityStart: $name, activeCount=${activeActivities.size}")
-
-        // 从 0→1 说明 Wallet 首次进入前台
-        if (wasEmpty) {
-            log("Wallet 进入前台（首个 Activity），触发 NFC 切换")
-            triggerNfcSwitch(activity, toWallet = true)
-        }
-    }
-
-    private fun onWalletActivityStop(activity: Activity, name: String) {
-        activeActivities.remove(name)
-        log("onWalletActivityStop: $name, activeCount=${activeActivities.size}")
-
-        // 只有当所有 Activity 都停止，才真正离开前台
-        if (activeActivities.isEmpty()) {
-            log("Wallet 所有 Activity 停止，延迟触发 NFC 还原")
-            restoreTask = Runnable {
-                log("Wallet 离开前台，执行 NFC 还原")
-                triggerNfcSwitch(activity, toWallet = false)
-                restoreTask = null
-            }
-            handler.postDelayed(restoreTask!!, 800)
-        }
-    }
 }
 
 // ════════════════════════ Google Pay 按钮视图 ════════════════════════
@@ -257,6 +205,18 @@ class GooglePayButtonView @JvmOverloads constructor(
         isClickable = true
         setOnClickListener {
             try {
+                // 保存当前 NFC 组件（点击按钮时，NFC 还是 MiPay）
+                val currentNfc = getCurrentNfcComponent(context)
+                if (currentNfc != null && currentNfc != WALLET_COMPONENT) {
+                    MainHook.savedNfcComponent = currentNfc
+                    MainHook.log("按钮点击: 保存当前 NFC=$currentNfc")
+                }
+                
+                // 切换 NFC 到 Wallet
+                MainHook.log("按钮点击: 设置 NFC = WALLET")
+                MainHook.setNfcComponentStatic(context, "com.google.android.apps.walletnfcrel/com.google.android.apps.wallet.tapandpay.quickaccesswallet.WalletQuickAccessWalletService")
+                
+                // 启动 Google Wallet
                 context.startActivity(Intent().apply {
                     component = ComponentName(MainHook.WALLET_PKG,
                         "com.google.android.apps.wallet.main.WalletActivity")
@@ -265,6 +225,23 @@ class GooglePayButtonView @JvmOverloads constructor(
             } catch (e: Throwable) {
                 Toast.makeText(context, "未安装 Google Wallet", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+    
+    private fun getCurrentNfcComponent(context: Context): String? {
+        return try {
+            val cr = context.contentResolver
+            val cls = Class.forName("android.provider.Settings\$Secure")
+            val method = cls.getDeclaredMethod(
+                "getStringForUser",
+                ContentResolver::class.java,
+                String::class.java,
+                Int::class.java
+            )
+            method.invoke(null, cr, "nfc_payment_default_component", -2) as? String
+        } catch (e: Exception) {
+            MainHook.log("getCurrentNfcComponent failed: ${e.message}")
+            null
         }
     }
 
