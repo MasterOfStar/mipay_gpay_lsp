@@ -9,6 +9,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.nfc.NfcAdapter
+import android.os.Build
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
@@ -52,6 +54,8 @@ class MainHook : IXposedHookLoadPackage {
             XposedBridge.log("$TAG: $msg")
         }
 
+        // 静态方法，供 GooglePayButtonView 调用
+        @JvmStatic
         fun setNfcComponentStatic(context: Context, component: String) {
             try {
                 val cr = context.contentResolver
@@ -65,66 +69,93 @@ class MainHook : IXposedHookLoadPackage {
                 )
                 val result = method.invoke(null, cr, KEY_NFC_PAYMENT, component, -2) as Boolean
                 log("setNfcComponent: $component, result=$result")
+                
+                // 主动触发 NFC 刷新
+                refreshNfcService(context)
             } catch (e: Exception) {
                 log("setNfcComponent failed: ${e.message}")
+            }
+        }
+        
+        // 触发 NFC 服务刷新
+        @JvmStatic
+        private fun refreshNfcService(context: Context) {
+            try {
+                val nfcAdapter = NfcAdapter.getDefaultAdapter(context)
+                nfcAdapter?.let { adapter ->
+                    // 尝试禁用再启用 NFC 来刷新状态
+                    if (adapter.isEnabled) {
+                        // 使用反射调用 maybeUpdateCardEmulationRoute
+                        val cls = adapter.javaClass
+                        try {
+                            val method = cls.getDeclaredMethod("maybeUpdateCardEmulationRoute")
+                            method.isAccessible = true
+                            method.invoke(adapter)
+                            log("NFC refresh triggered")
+                        } catch (e: NoSuchMethodException) {
+                            // 方法不存在，忽略
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                log("refreshNfcService failed: ${e.message}")
             }
         }
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        log("handleLoadPackage: ${lpparam.packageName}")
         if (lpparam.packageName == MIPAY_PKG) {
             setupMiPayHooks(lpparam)
         }
     }
 
-    // 保存原始 NFC 组件（静态变量，进程内共享）
-    private var savedNfcComponent: String? = null
-
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
         try {
+            // Hook DoubleClickActivity
             val targetClass = XposedHelpers.findClass(
                 "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
             )
             
-            // onResume: MiPay 回到前台
+            // attach: 在 Activity attach 到 Context 之前就设置 NFC (beforeHookedMethod)
+            XposedHelpers.findAndHookMethod(targetClass, "attach", android.content.Context::class.java, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as Activity
+                    log("DoubleClickActivity.attach (before) - 设置 NFC = MiPay")
+                    setNfcComponent(activity, MIPAY_COMPONENT)
+                }
+            })
+            
+            // onCreate: 再次确认
+            XposedHelpers.findAndHookMethod(targetClass, "onCreate", android.os.Bundle::class.java, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as Activity
+                    log("DoubleClickActivity.onCreate (before) - 确认 NFC = MiPay")
+                    setNfcComponent(activity, MIPAY_COMPONENT)
+                }
+            })
+            
+            // onResume: 最终确认 + 注入按钮
             XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as Activity
-                    log("DoubleClickActivity.onResume")
-                    
-                    // 如果之前切换到 Wallet 时保存了原始值，现在恢复
-                    if (savedNfcComponent != null) {
-                        log("恢复原始 NFC: $savedNfcComponent")
-                        setNfcComponentStatic(activity, savedNfcComponent!!)
-                        savedNfcComponent = null
-                    } else {
-                        // 首次打开 MiPay，设置 NFC = MiPay
-                        log("设置 NFC = MiPay")
-                        setNfcComponentStatic(activity, MIPAY_COMPONENT)
-                    }
-                    
-                    // 注入按钮
+                    log("DoubleClickActivity.onResume - 最终确认 NFC = MiPay")
+                    setNfcComponent(activity, MIPAY_COMPONENT)
                     injectButton(activity)
                 }
             })
             
         } catch (e: Throwable) {
             log("MiPay hook failed: ${e.message}")
-            XposedBridge.log("$TAG: MiPay hook failed: ${e.message}")
         }
     }
 
+    private fun setNfcComponent(context: Context, component: String) {
+        setNfcComponentStatic(context, component)
+    }
+
     private fun injectButton(activity: Activity) {
-        val decor = activity.window.decorView as? ViewGroup ?: run {
-            log("injectButton: decorView 为空")
-            return
-        }
-        
-        if (decor.findViewWithTag<View>(INJECT_TAG) != null) {
-            log("injectButton: 按钮已存在，跳过")
-            return
-        }
+        val decor = activity.window.decorView as? ViewGroup ?: return
+        if (decor.findViewWithTag<View>(INJECT_TAG) != null) return
 
         val btn = GooglePayButtonView(decor.context).apply {
             tag = INJECT_TAG
@@ -140,16 +171,13 @@ class MainHook : IXposedHookLoadPackage {
             val ph = decor.height
             if (pw > 0 && ph > 0) {
                 btn.layoutParams = FrameLayout.LayoutParams(w, h).apply {
-                    leftMargin = pw - w - (20 * density).toInt()
-                    topMargin = ph - h - (90 * density).toInt()
+                    leftMargin = pw - w - (10 * density).toInt()
+                    topMargin = ph - h - (100 * density).toInt()
                 }
             }
         }
 
-        decor.post {
-            decor.addView(btn)
-            log("injectButton: 按钮已添加")
-        }
+        decor.post { decor.addView(btn) }
     }
 }
 
@@ -169,6 +197,9 @@ class GooglePayButtonView @JvmOverloads constructor(
                 android.content.res.Configuration.UI_MODE_NIGHT_YES
         when {
             isDark -> android.graphics.Color.parseColor("#121212")
+            Build.VERSION.SDK_INT >= 31 -> context.theme.resources.getColor(
+                android.R.color.system_accent1_100, context.theme
+            )
             else -> android.graphics.Color.rgb(33, 150, 243)
         }
     }
@@ -206,32 +237,30 @@ class GooglePayButtonView @JvmOverloads constructor(
         val pic = svgObj.renderToPicture()
         bmp = Bitmap.createBitmap(160, 76, Bitmap.Config.ARGB_8888).apply {
             Canvas(this).apply {
-                drawColor(android.graphics.Color.TRANSPARENT)
-                drawPicture(pic, RectF(0f, 0f, 160f, 76f))
+                save()
+                scale(160f / pic.width, 76f / pic.height)
+                drawPicture(pic)
+                restore()
             }
         }
     }
 
-    override fun onDraw(canvas: Canvas) {
-        rect.set(0f, 0f, width.toFloat(), height.toFloat())
-        
-        // 背景
-        bgPaint.color = bgColor
-        bgPaint.style = Paint.Style.FILL
-        canvas.drawRoundRect(rect, 8 * density, 8 * density, bgPaint)
-        
-        // SVG 图标
-        val bmpObj = bmp ?: return
-        val scale = (width * 0.9f) / bmpObj.width
-        val scaledW = (bmpObj.width * scale).toInt()
-        val scaledH = (bmpObj.height * scale).toInt()
-        val left = (width - scaledW) / 2f
-        val top = (height - scaledH) / 2f
-        canvas.drawBitmap(bmpObj, null, android.graphics.RectF(left, top, left + scaledW, top + scaledH), svgPaint)
+    override fun onMeasure(wSpec: Int, hSpec: Int) {
+        val d = resources.displayMetrics.density
+        setMeasuredDimension((104 * d).toInt(), (58 * d).toInt())
     }
 
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val density = context.resources.displayMetrics.density
-        setMeasuredDimension((104 * density).toInt(), (58 * density).toInt())
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        rect.set(0f, 0f, w, h)
+        bgPaint.color = bgColor
+        c.drawRoundRect(rect, h / 2, h / 2, bgPaint)
+
+        bmp?.let {
+            val th = h * 0.6f
+            val tw = it.width.toFloat() / it.height * th
+            c.drawBitmap(it, null, RectF((w - tw) / 2, (h - th) / 2, (w + tw) / 2, (h + th) / 2), svgPaint)
+        }
     }
 }
