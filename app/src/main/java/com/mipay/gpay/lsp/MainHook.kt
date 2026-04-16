@@ -66,6 +66,26 @@ class MainHook : IXposedHookLoadPackage {
         // 保存原始 NFC 组件（静态变量，进程内共享）
         @JvmStatic
         var savedNfcComponent: String? = null
+
+        // 静态方法，供 GooglePayButtonView 调用
+        @JvmStatic
+        fun setNfcComponentStatic(context: Context, component: String) {
+            try {
+                val cr = context.contentResolver
+                val cls = Class.forName("android.provider.Settings\$Secure")
+                val method = cls.getDeclaredMethod(
+                    "putStringForUser",
+                    ContentResolver::class.java,
+                    String::class.java,
+                    String::class.java,
+                    Int::class.java
+                )
+                val result = method.invoke(null, cr, KEY_NFC_PAYMENT, component, -2) as Boolean
+                log("setNfcComponent: $component, result=$result")
+            } catch (e: Exception) {
+                log("setNfcComponent failed: ${e.message}")
+            }
+        }
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -91,10 +111,10 @@ class MainHook : IXposedHookLoadPackage {
                     val activity = param.thisObject as Activity
                     log("DoubleClickActivity.onResume")
                     // 如果之前切换到 Wallet 时保存了原始值，现在恢复
-                    if (MainHook.savedNfcComponent != null) {
-                        log("恢复原始 NFC: ${MainHook.savedNfcComponent}")
-                        setNfcComponent(activity, MainHook.savedNfcComponent!!)
-                        MainHook.savedNfcComponent = null
+                    if (savedNfcComponent != null) {
+                        log("恢复原始 NFC: $savedNfcComponent")
+                        setNfcComponent(activity, savedNfcComponent!!)
+                        savedNfcComponent = null
                     } else {
                         // 首次打开 MiPay，设置 NFC = MiPay
                         log("设置 NFC = MiPay")
@@ -126,25 +146,6 @@ class MainHook : IXposedHookLoadPackage {
         setNfcComponentStatic(context, component)
     }
 
-    // 静态方法，供 GooglePayButtonView 调用
-    fun setNfcComponentStatic(context: Context, component: String) {
-        try {
-            val cr = context.contentResolver
-            val cls = Class.forName("android.provider.Settings\$Secure")
-            val method = cls.getDeclaredMethod(
-                "putStringForUser",
-                ContentResolver::class.java,
-                String::class.java,
-                String::class.java,
-                Int::class.java
-            )
-            val result = method.invoke(null, cr, KEY_NFC_PAYMENT, component, -2) as Boolean
-            log("setNfcComponent: $component, result=$result")
-        } catch (e: Exception) {
-            log("setNfcComponent failed: ${e.message}")
-        }
-    }
-
     private fun injectButton(activity: Activity) {
         val decor = activity.window.decorView as? ViewGroup ?: return
         if (decor.findViewWithTag<View>(INJECT_TAG) != null) return
@@ -171,7 +172,6 @@ class MainHook : IXposedHookLoadPackage {
 
         decor.post { decor.addView(btn) }
     }
-
 
 }
 
@@ -213,7 +213,7 @@ class GooglePayButtonView @JvmOverloads constructor(
                 
                 // 切换 NFC 到 Wallet
                 MainHook.log("按钮点击: 设置 NFC = WALLET")
-                MainHook.setNfcComponentStatic(context, "com.google.android.apps.walletnfcrel/com.google.android.apps.wallet.tapandpay.quickaccesswallet.WalletQuickAccessWalletService")
+                MainHook.setNfcComponentStatic(context, MainHook.WALLET_COMPONENT)
                 
                 // 启动 Google Wallet
                 context.startActivity(Intent().apply {
