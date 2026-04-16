@@ -111,25 +111,34 @@ class MainHook : IXposedHookLoadPackage {
 
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
         try {
-            // Hook DoubleClickActivity 的 onCreate - 最早时机
+            // Hook DoubleClickActivity
             val targetClass = XposedHelpers.findClass(
                 "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
             )
             
-            // onCreate: 最早设置 NFC (before 比 after 更早)
-            XposedHelpers.findAndHookMethod(targetClass, "onCreate", android.os.Bundle::class.java, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
+            // attach: 比 onCreate 更早的时机
+            XposedHelpers.findAndHookMethod(targetClass, "attach", android.content.Context::class.java, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as Activity
-                    log("DoubleClickActivity.onCreate (before) - 设置 NFC = MiPay")
+                    log("DoubleClickActivity.attach - 设置 NFC = MiPay")
                     setNfcComponent(activity, MIPAY_COMPONENT)
                 }
             })
             
-            // onResume: 再次确认 + 注入按钮
+            // onCreate: 再次确认
+            XposedHelpers.findAndHookMethod(targetClass, "onCreate", android.os.Bundle::class.java, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as Activity
+                    log("DoubleClickActivity.onCreate - 确认 NFC = MiPay")
+                    setNfcComponent(activity, MIPAY_COMPONENT)
+                }
+            })
+            
+            // onResume: 最终确认 + 注入按钮
             XposedHelpers.findAndHookMethod(targetClass, "onResume", object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as Activity
-                    log("DoubleClickActivity.onResume - 确认 NFC = MiPay")
+                    log("DoubleClickActivity.onResume - 最终确认 NFC = MiPay")
                     setNfcComponent(activity, MIPAY_COMPONENT)
                     injectButton(activity)
                 }
