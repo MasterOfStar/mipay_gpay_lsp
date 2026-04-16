@@ -91,10 +91,10 @@ class MainHook : IXposedHookLoadPackage {
                     val activity = param.thisObject as Activity
                     log("DoubleClickActivity.onResume")
                     // 如果之前切换到 Wallet 时保存了原始值，现在恢复
-                    if (savedNfcComponent != null) {
-                        log("恢复原始 NFC: $savedNfcComponent")
-                        setNfcComponent(activity, savedNfcComponent!!)
-                        savedNfcComponent = null
+                    if (MainHook.savedNfcComponent != null) {
+                        log("恢复原始 NFC: ${MainHook.savedNfcComponent}")
+                        setNfcComponent(activity, MainHook.savedNfcComponent!!)
+                        MainHook.savedNfcComponent = null
                     } else {
                         // 首次打开 MiPay，设置 NFC = MiPay
                         log("设置 NFC = MiPay")
