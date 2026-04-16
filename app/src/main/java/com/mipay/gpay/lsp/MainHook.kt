@@ -208,7 +208,7 @@ class GooglePayButtonView @JvmOverloads constructor(
             try {
                 // 保存当前 NFC 组件（点击按钮时，NFC 还是 MiPay）
                 val currentNfc = getCurrentNfcComponent(context)
-                if (currentNfc != null && currentNfc != WALLET_COMPONENT) {
+                if (currentNfc != null && currentNfc != MainHook.WALLET_COMPONENT) {
                     MainHook.savedNfcComponent = currentNfc
                     MainHook.log("按钮点击: 保存当前 NFC=$currentNfc")
                 }
