@@ -116,11 +116,11 @@ class MainHook : IXposedHookLoadPackage {
                 "com.miui.tsmclient.ui.quick.DoubleClickActivity", lpparam.classLoader
             )
             
-            // onCreate: 最早设置 NFC
+            // onCreate: 最早设置 NFC (before 比 after 更早)
             XposedHelpers.findAndHookMethod(targetClass, "onCreate", android.os.Bundle::class.java, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
+                override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as Activity
-                    log("DoubleClickActivity.onCreate - 设置 NFC = MiPay")
+                    log("DoubleClickActivity.onCreate (before) - 设置 NFC = MiPay")
                     setNfcComponent(activity, MIPAY_COMPONENT)
                 }
             })

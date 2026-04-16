@@ -2,6 +2,5 @@
 <resources>
     <string-array name="xposed_scope">
         <item>com.miui.tsmclient</item>
-        <item>com.google.android.apps.walletnfcrel</item>
     </string-array>
 </resources>
