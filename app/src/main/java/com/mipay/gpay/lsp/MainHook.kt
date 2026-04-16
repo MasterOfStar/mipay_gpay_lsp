@@ -38,10 +38,10 @@ class MainHook : IXposedHookLoadPackage {
         
         // NFC 设置 Key
         private const val KEY_NFC_PAYMENT = "nfc_payment_default_component"
-        // Google Wallet 组件
-        const val WALLET_COMPONENT = "com.google.android.apps.walletnfcrel/com.google.android.apps.wallet.tapandpay.quickaccesswallet.WalletQuickAccessWalletService"
-        // MiPay 组件（默认）
-        private const val MIPAY_COMPONENT = "com.miui.tsmclient/com.miui.tsmclient.service.NfcService"
+        // Google Wallet NFC 组件 (GmsCore)
+        const val WALLET_COMPONENT = "com.google.android.gms/com.google.android.gms.tapandpay.hce.service.TpHceService"
+        // MiPay NFC 组件 (系统默认)
+        private const val MIPAY_COMPONENT = "com.android.nfc/com.android.nfc.cardemulation.ESEWalletDummyService"
 
         private const val GOOGLE_PAY_SVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="38.1" viewBox="0 0 80 38.1">
