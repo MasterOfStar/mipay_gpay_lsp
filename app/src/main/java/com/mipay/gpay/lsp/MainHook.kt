@@ -77,7 +77,8 @@ class MainHook : IXposedHookLoadPackage {
     // ════════════════════════ MiPay: 注入 GPay 按钮 + NFC 切换（极简方案）════════════════════════
 
     // 保存原始 NFC 组件（静态变量，进程内共享）
-    private var savedNfcComponent: String? = null
+    @JvmStatic
+    var savedNfcComponent: String? = null
 
     private fun setupMiPayHooks(lpparam: XC_LoadPackage.LoadPackageParam) {
         try {
