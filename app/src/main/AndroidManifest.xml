@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
-        android:label="MiPay GPay 快捷按钮"
+        android:label="MiPay GPay"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
 
@@ -12,10 +14,20 @@
             android:value="true" />
         <meta-data
             android:name="xposedmodname"
-            android:value="MiPay GPay 快捷按钮" />
+            android:value="MiPay GPay" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="为Mipay添加Google Pay的跳转按钮，并自动设置默认付款应用" />
         <meta-data
             android:name="xposedminversion"
             android:value="54" />
+
+        <!-- LSPosed 作用域 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+        <!-- NFC 切换广播接收器：动态注册，无需声明 -->
 
     </application>
 

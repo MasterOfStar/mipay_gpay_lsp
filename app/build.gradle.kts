@@ -11,8 +11,8 @@ android {
         applicationId = "com.mipay.gpay.lsp"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     signingConfigs {
@@ -31,10 +31,6 @@ android {
         release {
             signingConfig = signingConfigs.getByName("mipay")
             isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
         }
     }
 
