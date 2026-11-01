@@ -64,6 +64,16 @@ class MainHook : IXposedHookLoadPackage {
         }
 
         @JvmStatic
+        fun launchWalletQuickDrawFromSystem(context: Context) {
+            Thread {
+                if (!startWalletQuickDrawActivity(context)) {
+                    log("SYSTEM direct QuickDraw start failed; use root provider")
+                    launchWalletQuickDraw(context)
+                }
+            }.start()
+        }
+
+        @JvmStatic
         fun launchWalletQuickDraw(context: Context) {
             Thread {
                 log("ROOT provider request")
@@ -91,13 +101,21 @@ class MainHook : IXposedHookLoadPackage {
 
         private fun launchWalletQuickDrawDirect(context: Context) {
             log("ROOT fallback direct startActivity")
-            try {
+            if (!startWalletQuickDrawActivity(context)) {
+                Toast.makeText(context, "未安装 Google Wallet", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        private fun startWalletQuickDrawActivity(context: Context): Boolean {
+            return try {
                 context.startActivity(Intent(WALLET_QUICKDRAW_ACTION).apply {
                     component = ComponentName(WALLET_PKG, WALLET_QUICKDRAW_ACTIVITY)
                     flags = WALLET_QUICKDRAW_FLAGS
                 })
+                true
             } catch (e: Throwable) {
-                Toast.makeText(context, "未安装 Google Wallet", Toast.LENGTH_SHORT).show()
+                log("direct QuickDraw start failed: ${e.message}")
+                false
             }
         }
 
@@ -155,7 +173,10 @@ class MainHook : IXposedHookLoadPackage {
         DevLog.i("LOAD package=${lpparam.packageName} mode=$mode")
         when (lpparam.packageName) {
             MIPAY_PKG -> setupMiPayHooks(lpparam)
-            "android" -> SystemServerQuickDrawHooks.install(lpparam.classLoader)
+            "android" -> {
+                SystemServerQuickDrawHooks.install(lpparam.classLoader)
+                PowerQuickDrawHooks.install(lpparam.classLoader)
+            }
             else -> DevLog.i("LOAD ignored package=${lpparam.packageName}")
         }
     }
@@ -208,8 +229,9 @@ class MainHook : IXposedHookLoadPackage {
         }
 
         val density = decor.context.resources.displayMetrics.density
-        val w = (104 * density).toInt()
-        val h = (58 * density).toInt()
+        val miuixStyle = SettingsStore.getBoolean(decor.context, SettingsStore.MIUIX_STYLE)
+        val w = ((if (miuixStyle) 112 else 104) * density).toInt()
+        val h = ((if (miuixStyle) 48 else 58) * density).toInt()
 
         btn.post {
             val pw = decor.width
@@ -235,13 +257,17 @@ class GooglePayButtonView @JvmOverloads constructor(
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val svgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
+    private val isMiuixStyle = SettingsStore.getBoolean(context, SettingsStore.MIUIX_STYLE)
 
     private val bgColor: Int by lazy {
         val isDark = (context.resources.configuration.uiMode and
                 android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                 android.content.res.Configuration.UI_MODE_NIGHT_YES
         when {
-            isDark -> android.graphics.Color.parseColor("#121212")
+            isDark -> {
+                if (isMiuixStyle) android.graphics.Color.parseColor("#1C1C1E")
+                else android.graphics.Color.parseColor("#121212")
+            }
             Build.VERSION.SDK_INT >= 31 -> context.theme.resources.getColor(
                 android.R.color.system_accent1_100, context.theme
             )
@@ -287,7 +313,10 @@ class GooglePayButtonView @JvmOverloads constructor(
 
     override fun onMeasure(wSpec: Int, hSpec: Int) {
         val d = resources.displayMetrics.density
-        setMeasuredDimension((104 * d).toInt(), (58 * d).toInt())
+        setMeasuredDimension(
+            ((if (isMiuixStyle) 112 else 104) * d).toInt(),
+            ((if (isMiuixStyle) 48 else 58) * d).toInt()
+        )
     }
 
     override fun onDraw(c: Canvas) {
@@ -295,7 +324,8 @@ class GooglePayButtonView @JvmOverloads constructor(
         val h = height.toFloat()
         rect.set(0f, 0f, w, h)
         bgPaint.color = bgColor
-        c.drawRoundRect(rect, h / 2, h / 2, bgPaint)
+        val cornerRadius = if (isMiuixStyle) 16 * resources.displayMetrics.density else h / 2
+        c.drawRoundRect(rect, cornerRadius, cornerRadius, bgPaint)
 
         bmp?.let {
             val th = h * 0.6f

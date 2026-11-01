@@ -25,7 +25,7 @@ class RootCommandProvider : ContentProvider() {
 
     private fun checkCaller() {
         val callerUid = Binder.getCallingUid()
-        if (callerUid == Process.myUid()) return
+        if (callerUid == Process.myUid() || callerUid == Process.SYSTEM_UID) return
 
         val packages = context?.packageManager?.getPackagesForUid(callerUid)
         if (packages?.contains(MainHook.MIPAY_PKG) != true) {

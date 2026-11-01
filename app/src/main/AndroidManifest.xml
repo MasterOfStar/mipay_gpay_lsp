@@ -37,6 +37,35 @@
             android:exported="true"
             android:directBootAware="true" />
 
+        <provider
+            android:name=".SettingsProvider"
+            android:authorities="com.mipay.gpay.lsp.settings"
+            android:exported="true"
+            android:directBootAware="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true">
+            <intent-filter>
+                <action android:name="com.mipay.gpay.lsp.SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity-alias
+            android:name=".LauncherActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- NFC 切换广播接收器：动态注册，无需声明 -->
 
     </application>
