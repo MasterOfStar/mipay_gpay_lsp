@@ -1,8 +1,6 @@
 package com.mipay.gpay.lsp
 
 import android.app.Activity
-import android.content.ComponentName
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -146,18 +144,7 @@ class MainActivity : Activity() {
     }
 
     private fun syncLauncherIcon() {
-        val hidden = SettingsStore.getBoolean(this, SettingsStore.HIDE_LAUNCHER_ICON)
-        val component = ComponentName(packageName, "$packageName.LauncherActivity")
-        val newState = if (hidden) {
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-        } else {
-            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-        }
-        packageManager.setComponentEnabledSetting(
-            component,
-            newState,
-            PackageManager.DONT_KILL_APP
-        )
+        LauncherIconSync.sync(this)
     }
 
     private fun addCard(

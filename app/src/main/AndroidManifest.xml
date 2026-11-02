@@ -2,12 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="com.mipay.gpay.lsp.permission.QUICKDRAW" />
+
+    <permission
+        android:name="com.mipay.gpay.lsp.permission.QUICKDRAW"
+        android:protectionLevel="signature" />
 
     <queries>
         <package android:name="com.miui.tsmclient" />
     </queries>
 
     <application
+        android:name=".App"
         android:label="MiPay GPay"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">
@@ -52,7 +58,21 @@
                 <action android:name="com.mipay.gpay.lsp.SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
         </activity>
+
+        <activity
+            android:name=".QuickDrawLaunchActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:permission="com.mipay.gpay.lsp.permission.QUICKDRAW"
+            android:showWhenLocked="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:turnScreenOn="true" />
 
         <activity-alias
             android:name=".LauncherActivity"
@@ -64,6 +84,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+
+        <receiver
+            android:name=".PackageReplacedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- NFC 切换广播接收器：动态注册，无需声明 -->
 

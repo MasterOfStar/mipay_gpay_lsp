@@ -37,7 +37,7 @@ object SystemServerQuickDrawHooks {
     fun install(loader: ClassLoader) {
         DevLog.i("SYSTEM install QuickDraw hook")
         installDismissHook(loader)
-        installShowWhenLockedHook(loader)
+        installVisibilityHooks(loader)
     }
 
     private fun installDismissHook(loader: ClassLoader) {
@@ -197,7 +197,7 @@ object SystemServerQuickDrawHooks {
         }.getOrNull()
     }
 
-    private fun installShowWhenLockedHook(loader: ClassLoader) {
+    private fun installVisibilityHooks(loader: ClassLoader) {
         val recordClass = runCatching {
             XposedHelpers.findClass("com.android.server.wm.ActivityRecord", loader)
         }.getOrElse {
@@ -224,6 +224,63 @@ object SystemServerQuickDrawHooks {
             DevLog.e("SYSTEM ActivityRecord#canShowWhenLocked hook not found")
         } else {
             DevLog.i("SYSTEM ActivityRecord#canShowWhenLocked hook installed")
+        }
+
+        installRecordFlagHook(recordClass, "setShowWhenLocked", loader)
+        installRecordFlagHook(recordClass, "setInheritShowWhenLocked", loader)
+
+        val keyguardClass = runCatching {
+            XposedHelpers.findClass("com.android.server.wm.KeyguardController", loader)
+        }.getOrNull()
+        if (keyguardClass == null) {
+            DevLog.e("SYSTEM KeyguardController missing for visibility hooks")
+            return
+        }
+
+        for (methodName in listOf("checkKeyguardVisibility", "canShowActivityWhileKeyguardShowing")) {
+            val visibilityHooks = runCatching {
+                XposedBridge.hookAllMethods(
+                    keyguardClass,
+                    methodName,
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            val record = param.args.getOrNull(0) ?: return
+                            if (!isWalletSession(record, loader)) return
+                            DevLog.i("SYSTEM forced $methodName=true for Wallet QuickDraw")
+                            param.result = true
+                        }
+                    }
+                )
+            }.getOrDefault(emptySet())
+            if (visibilityHooks.isNotEmpty()) {
+                DevLog.i("SYSTEM KeyguardController#$methodName hook installed")
+            }
+        }
+    }
+
+    private fun installRecordFlagHook(
+        recordClass: Class<*>,
+        methodName: String,
+        loader: ClassLoader
+    ) {
+        val hooks = runCatching {
+            XposedBridge.hookAllMethods(
+                recordClass,
+                methodName,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val record = param.thisObject ?: return
+                        val enabled = param.args.getOrNull(0) as? Boolean ?: return
+                        if (enabled) return
+                        if (!isQuickDrawRecord(record, loader)) return
+                        DevLog.i("SYSTEM force ActivityRecord#$methodName=true")
+                        param.args[0] = true
+                    }
+                }
+            )
+        }.getOrDefault(emptySet())
+        if (hooks.isNotEmpty()) {
+            DevLog.i("SYSTEM ActivityRecord#$methodName hook installed")
         }
     }
 
@@ -258,10 +315,15 @@ object SystemServerQuickDrawHooks {
         if (packageOf(record) != MainHook.WALLET_PKG) return false
         val intent = intentOf(record)
         if (intent?.getBooleanExtra(MainHook.EXTRA_QUICKDRAW_SESSION, false) == true) return true
-        if (intent?.action != MainHook.WALLET_QUICKDRAW_ACTION) return false
 
         val component = componentOf(record)
-        return component?.className == MainHook.WALLET_QUICKDRAW_ACTIVITY
+        if (component?.packageName == MainHook.WALLET_PKG &&
+            component.className == MainHook.WALLET_QUICKDRAW_ACTIVITY
+        ) {
+            return true
+        }
+        return intent?.action == MainHook.WALLET_QUICKDRAW_ACTION &&
+            component?.packageName == MainHook.WALLET_PKG
     }
 
     private fun markSession(record: Any) {

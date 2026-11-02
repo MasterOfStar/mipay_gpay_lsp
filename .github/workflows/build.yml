@@ -2,11 +2,11 @@ name: Build & Release
 
 on:
   push:
-    branches: [master, test1, dev, dev1.5, dev1.6]
+    branches: [master, test1, dev, dev1.5]
     tags:
       - "v*"
   pull_request:
-    branches: [master, test1, dev, dev1.5, dev1.6]
+    branches: [master, test1, dev, dev1.5]
 
 env:
   JAVA_VERSION: "17"

@@ -9,7 +9,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Rect
 import android.graphics.RectF
 import android.net.Uri
 import android.nfc.NfcAdapter
@@ -263,7 +262,6 @@ class GooglePayButtonView @JvmOverloads constructor(
 
     private var svg: SVG? = null
     private var bmp: Bitmap? = null
-    private val logoBounds = Rect()
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val svgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
@@ -305,38 +303,16 @@ class GooglePayButtonView @JvmOverloads constructor(
         val pic = svgObj.renderToPicture()
         val pictureWidth = pic.width.takeIf { it > 0 } ?: 80
         val pictureHeight = pic.height.takeIf { it > 0 } ?: 38
-        val targetHeight = (32 * resources.displayMetrics.density).toInt().coerceAtLeast(48)
-        val targetWidth = (targetHeight * pictureWidth.toFloat() / pictureHeight)
+        val targetWidth = (160 * resources.displayMetrics.density).toInt().coerceAtLeast(160)
+        val targetHeight = (targetWidth * pictureHeight.toFloat() / pictureWidth)
             .toInt()
             .coerceAtLeast(1)
 
-        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-        Canvas(bitmap).apply {
-            scale(targetWidth.toFloat() / pictureWidth, targetHeight.toFloat() / pictureHeight)
-            drawPicture(pic)
-        }
-        bmp = bitmap
-
-        logoBounds.set(0, 0, targetWidth, targetHeight)
-        val pixels = IntArray(targetWidth * targetHeight)
-        bitmap.getPixels(pixels, 0, targetWidth, 0, 0, targetWidth, targetHeight)
-        var minX = targetWidth
-        var minY = targetHeight
-        var maxX = -1
-        var maxY = -1
-        for (y in 0 until targetHeight) {
-            for (x in 0 until targetWidth) {
-                val alpha = (pixels[y * targetWidth + x] ushr 24) and 0xFF
-                if (alpha > 8) {
-                    if (x < minX) minX = x
-                    if (x > maxX) maxX = x
-                    if (y < minY) minY = y
-                    if (y > maxY) maxY = y
-                }
+        bmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888).apply {
+            Canvas(this).apply {
+                scale(targetWidth.toFloat() / pictureWidth, targetHeight.toFloat() / pictureHeight)
+                drawPicture(pic)
             }
-        }
-        if (maxX >= minX && maxY >= minY) {
-            logoBounds.set(minX, minY, maxX + 1, maxY + 1)
         }
     }
 
@@ -361,15 +337,17 @@ class GooglePayButtonView @JvmOverloads constructor(
         }
 
         bmp?.let {
-            if (logoBounds.width() <= 0 || logoBounds.height() <= 0) return@let
-            val targetHeight = h * (if (isMiuixStyle) 0.68f else 0.60f)
-            val targetWidth = targetHeight * logoBounds.width() / logoBounds.height()
-            val left = (w - targetWidth) / 2
-            val top = (h - targetHeight) / 2
+            val targetHeight = h * 0.6f
+            val targetWidth = it.width.toFloat() / it.height * targetHeight
             c.drawBitmap(
                 it,
-                logoBounds,
-                RectF(left, top, left + targetWidth, top + targetHeight),
+                null,
+                RectF(
+                    (w - targetWidth) / 2,
+                    (h - targetHeight) / 2,
+                    (w + targetWidth) / 2,
+                    (h + targetHeight) / 2
+                ),
                 svgPaint
             )
         }
@@ -381,7 +359,7 @@ class GooglePayButtonView @JvmOverloads constructor(
             android.content.res.Configuration.UI_MODE_NIGHT_YES
         return when {
             isMiuixStyle -> android.graphics.Color.parseColor(
-                if (isDark) "#434343" else "#F0F0F0"
+                if (isDark) "#404040" else "#F0F0F0"
             )
             isDark -> android.graphics.Color.parseColor("#1D1B20")
             Build.VERSION.SDK_INT >= 31 -> context.theme.resources.getColor(

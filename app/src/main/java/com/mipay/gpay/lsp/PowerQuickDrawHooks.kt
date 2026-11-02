@@ -24,7 +24,6 @@ object PowerQuickDrawHooks {
 
     private var lastEventSignature = ""
     private var lastEventAt = 0L
-    private var lastDecision: Int? = null
 
     private var cachedPowerDoubleClick = false
     private var settingsCachedAt = 0L
@@ -86,37 +85,27 @@ object PowerQuickDrawHooks {
         val signature = "${event.action}:${event.downTime}:${event.repeatCount}"
         val now = SystemClock.uptimeMillis()
         if (signature == lastEventSignature && now - lastEventAt < 100L) {
-            lastDecision?.let { param.result = it }
             return
         }
         lastEventSignature = signature
         lastEventAt = now
-        lastDecision = null
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> handlePowerDown(param, event)
             KeyEvent.ACTION_UP -> handlePowerUp(param, event)
-            else -> {
-                if (pendingSecond) {
-                    consume(param)
-                }
-                resetGesture()
-            }
+            else -> resetGesture()
         }
     }
 
     private fun handlePowerDown(param: XC_MethodHook.MethodHookParam, event: KeyEvent) {
         if (event.repeatCount > 0) {
-            if (pendingSecond) {
-                consume(param)
-            } else {
+            if (!pendingSecond) {
                 firstDownAt = 0L
             }
             return
         }
 
         if (pendingSecond) {
-            consume(param)
             return
         }
 
@@ -132,7 +121,6 @@ object PowerQuickDrawHooks {
             firstDownAt = 0L
             pendingSecond = true
             secondDownAt = event.downTime
-            consume(param)
             DevLog.i(
                 "POWER double press detected owner=${param.thisObject?.javaClass?.name} " +
                     "downTime=${event.downTime} repeat=${event.repeatCount}"
@@ -149,7 +137,6 @@ object PowerQuickDrawHooks {
         val duration = event.eventTime - secondDownAt
         val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
         pendingSecond = false
-        consume(param)
 
         if (duration in 0L until longPressTimeout && lastLaunchedDownTime != event.downTime) {
             lastLaunchedDownTime = event.downTime
@@ -159,11 +146,6 @@ object PowerQuickDrawHooks {
         } else {
             DevLog.i("POWER second press not launched duration=${duration}ms")
         }
-    }
-
-    private fun consume(param: XC_MethodHook.MethodHookParam) {
-        param.result = 0
-        lastDecision = 0
     }
 
     private fun resetGesture() {
