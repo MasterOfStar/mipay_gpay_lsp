@@ -19,7 +19,6 @@ import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.Toast
 import com.caverock.androidsvg.SVG
 import com.caverock.androidsvg.SVGParseException
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -99,18 +98,21 @@ class MainHook : IXposedHookLoadPackage {
         }
 
         private fun launchWalletQuickDrawDirect(context: Context) {
-            log("ROOT fallback direct startActivity")
+            log(
+                "DIRECT startActivity fallback action=${WalletQuickDraw.ACTION} " +
+                    "component=${WalletQuickDraw.PACKAGE}/${WalletQuickDraw.ACTIVITY}"
+            )
             if (!startWalletQuickDrawActivity(context)) {
-                Toast.makeText(context, "未安装 Google Wallet", Toast.LENGTH_SHORT).show()
+                log("DIRECT startActivity failed; Wallet unavailable or launch blocked")
             }
         }
 
         private fun startWalletQuickDrawActivity(context: Context): Boolean {
             return try {
-                context.startActivity(Intent(WALLET_QUICKDRAW_ACTION).apply {
-                    component = ComponentName(WALLET_PKG, WALLET_QUICKDRAW_ACTIVITY)
-                    flags = WALLET_QUICKDRAW_FLAGS
-                    putExtra(EXTRA_QUICKDRAW_SESSION, true)
+                context.startActivity(Intent(WalletQuickDraw.ACTION).apply {
+                    component = ComponentName(WalletQuickDraw.PACKAGE, WalletQuickDraw.ACTIVITY)
+                    flags = WalletQuickDraw.FLAGS
+                    putExtra(WalletQuickDraw.EXTRA_SESSION, true)
                 })
                 true
             } catch (e: Throwable) {
@@ -276,7 +278,7 @@ class GooglePayButtonView @JvmOverloads constructor(
                 MainHook.setNfcComponentStatic(context, MainHook.WALLET_COMPONENT)
                 MainHook.launchWalletQuickDraw(context)
             } catch (e: Throwable) {
-                Toast.makeText(context, "未安装 Google Wallet", Toast.LENGTH_SHORT).show()
+                MainHook.log("BUTTON click failed: ${e.message}")
             }
         }
     }
