@@ -81,6 +81,17 @@ class MainActivity : Activity() {
 
         addSpacer((12 * density).toInt())
         addCard(
+            title = "Wallet 内鉴权",
+            subtitle = "锁屏下先尝试 Wallet 自己的鉴权；失败可关闭改用系统解锁",
+            checked = SettingsStore.getBoolean(this, SettingsStore.WALLET_NATIVE_AUTH, true),
+            tokens = tokens,
+            miuix = miuix
+        ) { enabled ->
+            SettingsStore.setBoolean(this, SettingsStore.WALLET_NATIVE_AUTH, enabled)
+        }
+
+        addSpacer((12 * density).toInt())
+        addCard(
             title = "隐藏桌面图标",
             subtitle = "默认显示桌面图标，打开后仅保留 LSPosed 隐式入口",
             checked = SettingsStore.getBoolean(this, SettingsStore.HIDE_LAUNCHER_ICON),

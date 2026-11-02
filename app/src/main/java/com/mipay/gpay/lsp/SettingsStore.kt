@@ -6,6 +6,7 @@ import android.net.Uri
 object SettingsStore {
     const val MIUIX_STYLE = "miuix_style"
     const val POWER_DOUBLE_CLICK = "power_double_click"
+    const val WALLET_NATIVE_AUTH = "wallet_native_auth"
     const val HIDE_LAUNCHER_ICON = "hide_launcher_icon"
     const val LEGACY_SHOW_LAUNCHER_ICON = "show_launcher_icon"
 

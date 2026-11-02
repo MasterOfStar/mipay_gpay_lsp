@@ -1,6 +1,7 @@
 package com.mipay.gpay.lsp
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
@@ -38,6 +39,7 @@ object SystemServerQuickDrawHooks {
         DevLog.i("SYSTEM install QuickDraw hook")
         installDismissHook(loader)
         installVisibilityHooks(loader)
+        installBiometricDiagnostics(loader)
     }
 
     private fun installDismissHook(loader: ClassLoader) {
@@ -115,6 +117,21 @@ object SystemServerQuickDrawHooks {
         )
 
         if (visible) {
+            val nativeAuth = contextOf(param.thisObject)?.let {
+                SettingsStore.getBoolean(it, SettingsStore.WALLET_NATIVE_AUTH, true)
+            } ?: true
+            if (nativeAuth) {
+                DevLog.i("SYSTEM Wallet native auth mode: reject system dismiss")
+                if (callback != null) {
+                    runCatching {
+                        XposedHelpers.callMethod(callback, "onDismissError")
+                    }.onFailure {
+                        DevLog.e("SYSTEM onDismissError callback failed", it)
+                    }
+                }
+                skipOriginal(param)
+                return
+            }
             DevLog.i("SYSTEM Wallet QuickDraw visible; allow real keyguard authentication")
             return
         }
@@ -163,15 +180,34 @@ object SystemServerQuickDrawHooks {
                         "SYSTEM deferred Wallet ready after ${elapsed}ms " +
                             "visibleIgnoringKeyguard=$visibleIgnoringKeyguard nowVisible=$nowVisible"
                     )
-                    invokeOriginal(method, thisObject, args)
+                    finishDeferredDismiss(method, thisObject, args)
                 }
                 elapsed >= MAX_WAIT_MS -> {
                     DevLog.e("SYSTEM deferred Wallet timeout after ${elapsed}ms; invoke original")
-                    invokeOriginal(method, thisObject, args)
+                    finishDeferredDismiss(method, thisObject, args)
                 }
                 else -> deferUntilVisible(param, token, loader, startedAt)
             }
         }, RETRY_INTERVAL_MS)
+    }
+
+    private fun finishDeferredDismiss(method: Member, thisObject: Any?, args: Array<Any?>) {
+        val nativeAuth = contextOf(thisObject)?.let {
+            SettingsStore.getBoolean(it, SettingsStore.WALLET_NATIVE_AUTH, true)
+        } ?: true
+        if (nativeAuth) {
+            val callback = args.getOrNull(1)
+            if (callback != null) {
+                runCatching {
+                    XposedHelpers.callMethod(callback, "onDismissError")
+                }.onFailure {
+                    DevLog.e("SYSTEM deferred onDismissError callback failed", it)
+                }
+            }
+            DevLog.i("SYSTEM deferred Wallet native auth: reject system dismiss")
+            return
+        }
+        invokeOriginal(method, thisObject, args)
     }
 
     private fun invokeOriginal(method: Member, thisObject: Any?, args: Array<Any?>) {
@@ -195,6 +231,55 @@ object SystemServerQuickDrawHooks {
             val service = XposedHelpers.getObjectField(owner, "mService")
             XposedHelpers.getObjectField(service, "mGlobalLock")
         }.getOrNull()
+    }
+
+    private fun contextOf(owner: Any?): Context? {
+        return runCatching {
+            XposedHelpers.getObjectField(owner, "mContext") as? Context
+        }.getOrNull() ?: runCatching {
+            val service = XposedHelpers.getObjectField(owner, "mService")
+            XposedHelpers.getObjectField(service, "mContext") as? Context
+        }.getOrNull()
+    }
+
+    private fun installBiometricDiagnostics(loader: ClassLoader) {
+        val targetNames = listOf(
+            "com.android.server.biometrics.AuthService",
+            "com.android.server.biometrics.sensors.AuthService"
+        )
+        var installed = 0
+        for (className in targetNames) {
+            val targetClass = runCatching {
+                XposedHelpers.findClass(className, loader)
+            }.getOrNull() ?: continue
+
+            val hooks = runCatching {
+                XposedBridge.hookAllMethods(
+                    targetClass,
+                    "authenticate",
+                    object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val strings = param.args.filterIsInstance<String>()
+                            if (strings.none {
+                                    it.contains("wallet", ignoreCase = true) ||
+                                        it.contains("gms", ignoreCase = true)
+                                }
+                            ) {
+                                return
+                            }
+                            DevLog.i("BIOMETRIC authenticate args=${strings.joinToString()}")
+                        }
+                    }
+                )
+            }.getOrDefault(emptySet())
+            if (hooks.isNotEmpty()) {
+                DevLog.i("SYSTEM biometric diagnostic hook installed on $className")
+                installed++
+            }
+        }
+        if (installed == 0) {
+            DevLog.e("SYSTEM biometric diagnostic hook target not found")
+        }
     }
 
     private fun installVisibilityHooks(loader: ClassLoader) {
