@@ -1,6 +1,7 @@
 package com.mipay.gpay.lsp
 
 import android.app.Activity
+import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.Context
@@ -15,6 +16,8 @@ import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
@@ -67,8 +70,35 @@ class MainHook : IXposedHookLoadPackage {
 
         @JvmStatic
         fun launchWalletQuickDrawFromSystem(context: Context) {
-            // 有 root 时优先走 root provider；provider 不可用再回退到直接 startActivity。
-            launchWalletQuickDraw(context)
+            Thread {
+                // Let MIUI's power-key policy settle before deciding whether to wake the screen.
+                runCatching { Thread.sleep(200L) }
+                val powerManager = context.getSystemService(PowerManager::class.java)
+                val keyguardManager = context.getSystemService(KeyguardManager::class.java)
+                if (powerManager != null && !powerManager.isInteractive) {
+                    log("SYSTEM screen off; wake up before QuickDraw")
+                    runCatching {
+                        powerManager.wakeUp(SystemClock.uptimeMillis(), "mipay-gpay-quickdraw")
+                    }.onFailure {
+                        log("SYSTEM wake up failed: ${it.message}")
+                    }
+                }
+
+                val deadline = SystemClock.uptimeMillis() + 2_000L
+                while (powerManager != null &&
+                    !powerManager.isInteractive &&
+                    SystemClock.uptimeMillis() < deadline
+                ) {
+                    runCatching { Thread.sleep(50L) }
+                }
+
+                log(
+                    "SYSTEM launch QuickDraw interactive=${powerManager?.isInteractive} " +
+                        "keyguardLocked=${keyguardManager?.isKeyguardLocked}"
+                )
+                // 有 root 时优先走 root provider；provider 不可用再回退到直接 startActivity。
+                launchWalletQuickDraw(context)
+            }.start()
         }
 
         @JvmStatic
