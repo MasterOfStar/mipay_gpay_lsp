@@ -42,6 +42,11 @@ object SystemServerQuickDrawHooks {
         return SystemClock.uptimeMillis() - lastSeenAt < ACTIVE_WINDOW_MS
     }
 
+    fun markQuickDrawStarted() {
+        lastSeenAt = SystemClock.uptimeMillis()
+        DevLog.i("SYSTEM QuickDraw launch observed; mark active")
+    }
+
     fun install(loader: ClassLoader) {
         DevLog.i("SYSTEM install QuickDraw hook")
         installDismissHook(loader)

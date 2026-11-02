@@ -107,6 +107,10 @@ class MainHook : IXposedHookLoadPackage {
                     "SYSTEM launch QuickDraw interactive=${powerManager?.isInteractive} " +
                         "keyguardLocked=${keyguardManager?.isKeyguardLocked}"
                 )
+                if (SystemServerQuickDrawHooks.isQuickDrawActive()) {
+                    log("SYSTEM QuickDraw became active during wake wait; skip duplicate")
+                    return@Thread
+                }
                 // 有 root 时优先走 root provider；provider 不可用再回退到直接 startActivity。
                 launchWalletQuickDraw(context)
             }.start()

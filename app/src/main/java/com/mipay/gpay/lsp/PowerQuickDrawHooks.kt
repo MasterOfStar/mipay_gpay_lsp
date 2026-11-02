@@ -266,6 +266,15 @@ object PowerQuickDrawHooks {
             }.getOrNull()
         }
 
+        val isWalletQuickDraw = (packageName == WalletQuickDraw.PACKAGE &&
+            className == WalletQuickDraw.ACTIVITY) ||
+            (intent?.action == WalletQuickDraw.ACTION &&
+                intent.component?.packageName == WalletQuickDraw.PACKAGE)
+        if (isWalletQuickDraw) {
+            SystemServerQuickDrawHooks.markQuickDrawStarted()
+            return
+        }
+
         val isMiPayDoubleClick = packageName == MainHook.MIPAY_PKG &&
             (className == MIPAY_DOUBLE_CLICK_ACTIVITY ||
                 className == MIPAY_LEGACY_DOUBLE_CLICK_ACTIVITY)
