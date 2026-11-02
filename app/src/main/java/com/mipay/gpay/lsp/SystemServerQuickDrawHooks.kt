@@ -78,17 +78,35 @@ object SystemServerQuickDrawHooks {
     private fun handleDismissKeyguard(param: XC_MethodHook.MethodHookParam, loader: ClassLoader) {
         val token = param.args.getOrNull(0) as? IBinder ?: return
         val callback = param.args.getOrNull(1)
-        val record = findRecord(token, loader) ?: run {
+        val globalLock = globalLockOf(param.thisObject)
+        val record = (if (globalLock != null) {
+            synchronized(globalLock) { findRecord(token, loader) }
+        } else {
+            findRecord(token, loader)
+        }) ?: run {
             DevLog.i("SYSTEM dismiss token record not found token=$token")
             return
         }
 
-        if (!isWalletSession(record, loader)) {
+        val isWallet = if (globalLock != null) {
+            synchronized(globalLock) { isWalletSession(record, loader) }
+        } else {
+            isWalletSession(record, loader)
+        }
+        if (!isWallet) {
             return
         }
 
-        val visibleIgnoringKeyguard = readBoolean(record, "visibleIgnoringKeyguard")
-        val nowVisible = readBoolean(record, "nowVisible")
+        val visibleIgnoringKeyguard = if (globalLock != null) {
+            synchronized(globalLock) { readBoolean(record, "visibleIgnoringKeyguard") }
+        } else {
+            readBoolean(record, "visibleIgnoringKeyguard")
+        }
+        val nowVisible = if (globalLock != null) {
+            synchronized(globalLock) { readBoolean(record, "nowVisible") }
+        } else {
+            readBoolean(record, "nowVisible")
+        }
         val visible = visibleIgnoringKeyguard || nowVisible
         DevLog.i(
             "SYSTEM Wallet dismiss token=$token pkg=${packageOf(record)} " +
