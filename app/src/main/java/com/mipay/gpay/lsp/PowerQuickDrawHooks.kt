@@ -96,7 +96,7 @@ object PowerQuickDrawHooks {
         when (event.action) {
             KeyEvent.ACTION_DOWN -> handlePowerDown(param, event)
             KeyEvent.ACTION_UP -> handlePowerUp(param, event)
-            KeyEvent.ACTION_CANCEL -> {
+            else -> {
                 if (pendingSecond) {
                     consume(param)
                 }
