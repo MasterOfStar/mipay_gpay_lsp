@@ -25,6 +25,7 @@ object SystemServerQuickDrawHooks {
     private const val RETRY_INTERVAL_MS = 50L
     private const val MAX_WAIT_MS = 5_000L
     private const val SESSION_WINDOW_MS = 30_000L
+    private const val ACTIVE_WINDOW_MS = 5_000L
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -33,6 +34,13 @@ object SystemServerQuickDrawHooks {
 
     @Volatile
     private var sessionUntil = 0L
+
+    @Volatile
+    private var lastSeenAt = 0L
+
+    fun isQuickDrawActive(): Boolean {
+        return SystemClock.uptimeMillis() - lastSeenAt < ACTIVE_WINDOW_MS
+    }
 
     fun install(loader: ClassLoader) {
         DevLog.i("SYSTEM install QuickDraw hook")
@@ -368,6 +376,7 @@ object SystemServerQuickDrawHooks {
     }
 
     private fun markSession(record: Any) {
+        lastSeenAt = SystemClock.uptimeMillis()
         sessionUntil = SystemClock.uptimeMillis() + SESSION_WINDOW_MS
         val taskId = taskIdOf(record)
         if (taskId != -1) sessionTaskId = taskId

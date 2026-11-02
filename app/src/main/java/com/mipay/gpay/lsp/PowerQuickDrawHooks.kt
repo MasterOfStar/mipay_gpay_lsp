@@ -141,6 +141,10 @@ object PowerQuickDrawHooks {
         if (duration in 0L until longPressTimeout && lastLaunchedDownTime != event.downTime) {
             lastLaunchedDownTime = event.downTime
             val context = contextOf(param.thisObject) ?: return
+            if (SystemServerQuickDrawHooks.isQuickDrawActive()) {
+                DevLog.i("POWER QuickDraw already active; skip duplicate launch")
+                return
+            }
             DevLog.i("POWER launch Wallet QuickDraw duration=${duration}ms")
             MainHook.launchWalletQuickDrawFromSystem(context)
         } else {
