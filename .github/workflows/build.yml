@@ -1,0 +1,135 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [master, test1, dev]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [master, test1, dev]
+
+env:
+  JAVA_VERSION: "17"
+  XPOSED_API_URL: "https://maven.aliyun.com/repository/public/de/robv/android/xposed/api/82/api-82.jar"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Gradle files
+        uses: gradle/wrapper-validation-action@v2
+
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: "gradle"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4.0.4
+        with:
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
+
+      - name: Download Xposed API JAR
+        run: |
+          mkdir -p app/libs
+          curl -fsSL "${{ env.XPOSED_API_URL }}" -o app/libs/xposed-api.jar
+          echo "Downloaded: $(wc -c < app/libs/xposed-api.jar) bytes"
+          unzip -t app/libs/xposed-api.jar > /dev/null 2>&1 && echo "JAR valid" || { echo "JAR invalid"; exit 1; }
+
+      - name: Create keystore from secret
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "KEYSTORE_BASE64 is not configured"; exit 1; }
+          test -n "$KEYSTORE_PASS" || { echo "KEYSTORE_PASS is not configured"; exit 1; }
+          mkdir -p app/keystore
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > app/keystore/mipay.jks
+          test -s app/keystore/mipay.jks
+          keytool -list -keystore app/keystore/mipay.jks -storepass "$KEYSTORE_PASS" > /dev/null
+          echo "Keystore validated: $(wc -c < app/keystore/mipay.jks) bytes"
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEYSTORE_ALIAS: "mipaygpay"
+          KEY_PASS: ${{ secrets.KEYSTORE_PASS }}
+        run: ./gradlew assembleRelease --no-daemon
+        timeout-minutes: 30
+
+      - name: Verify APK signature
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose app/build/outputs/apk/release/app-release.apk
+
+      - name: Rename APK
+        run: |
+          COMMIT_ID=${GITHUB_SHA::7}
+          cp app/build/outputs/apk/release/app-release.apk "mipay_gpay_lsp_${COMMIT_ID}.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: mipay_gpay_lsp_*.apk
+          archive: false
+          retention-days: 7
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MiPay GPay LSP ${{ github.ref_name }}
+          body: |
+            ## MiPay GPay LSPosed 模块 ${{ github.ref_name }}
+
+            ### 更新内容
+            详见 [Commits](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }})
+
+            ### 安装说明
+            1. 下载下方 `mipay_gpay_lsp_*.apk`
+            2. 在 LSPosed Manager 中启用模块
+            3. 勾选作用域：`小米智能卡`（`com.miui.tsmclient`）和 `System Framework`（`android`）
+            4. 强制停止并重启小米智能卡
+
+            ### 系统要求
+            - LSPosed 框架
+            - Android 12+ (API 30+)
+            - 已安装 Google Wallet
+
+            ### 校验信息
+            - **构建时间**: ${{ github.event.head_commit.timestamp }}
+            - **提交**: ${{ github.sha }}
+          files: mipay_gpay_lsp_*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify WeChat Success
+        if: ${{ success() && env.WECHAT_WEBHOOK_URL != '' }}
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$WECHAT_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"✅ **MiPay GPay LSP 构建成功**\\n> 版本: \`${{ github.ref_name }}\`\\n> 提交: \`${{ github.sha }}\`\\n\\n📦 [下载 APK](https://github.com/${{ github.repository }}/releases)\"}}" || true
+
+      - name: Notify WeChat Failure
+        if: ${{ failure() && env.WECHAT_WEBHOOK_URL != '' }}
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$WECHAT_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"❌ **MiPay GPay LSP 构建失败**\\n> 提交: \`${{ github.sha }}\`\"}}" || true
