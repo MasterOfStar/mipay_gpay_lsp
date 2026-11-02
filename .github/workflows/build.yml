@@ -2,11 +2,11 @@ name: Build & Release
 
 on:
   push:
-    branches: [master, test1, dev, dev1.5]
+    branches: [master, test1, dev, dev1.5, dev1.6]
     tags:
       - "v*"
   pull_request:
-    branches: [master, test1, dev, dev1.5]
+    branches: [master, test1, dev, dev1.5, dev1.6]
 
 env:
   JAVA_VERSION: "17"
@@ -73,12 +73,16 @@ jobs:
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           "$APKSIGNER" verify --verbose app/build/outputs/apk/release/app-release.apk
 
+      - name: Rename APK
+        run: |
+          COMMIT_ID=${GITHUB_SHA::7}
+          cp app/build/outputs/apk/release/app-release.apk "mipay_gpay_lsp_${COMMIT_ID}.apk"
+
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: mipay-gpay-lsp-${{ github.run_number }}
-          path: app/build/outputs/apk/release/*.apk
+          path: mipay_gpay_lsp_*.apk
+          archive: false
           retention-days: 7
 
       - name: Create Release
@@ -93,9 +97,9 @@ jobs:
             详见 [Commits](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }})
 
             ### 安装说明
-            1. 下载下方 `app-release.apk`
+            1. 下载下方 `mipay_gpay_lsp_*.apk`
             2. 在 LSPosed Manager 中启用模块
-            3. 勾选作用域：`小米智能卡`（`com.miui.tsmclient`）
+            3. 勾选作用域：`小米智能卡`（`com.miui.tsmclient`）和 `System Framework`（`android`）
             4. 强制停止并重启小米智能卡
 
             ### 系统要求
@@ -106,7 +110,7 @@ jobs:
             ### 校验信息
             - **构建时间**: ${{ github.event.head_commit.timestamp }}
             - **提交**: ${{ github.sha }}
-          files: app/build/outputs/apk/release/*.apk
+          files: mipay_gpay_lsp_*.apk
           draft: false
           prerelease: false
         env:

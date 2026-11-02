@@ -11,14 +11,20 @@ import android.os.Process
 
 class SettingsProvider : ContentProvider() {
 
-    override fun onCreate(): Boolean = true
+    override fun onCreate(): Boolean {
+        val prefs = preferences() ?: return true
+        if (!prefs.contains(SettingsStore.HIDE_LAUNCHER_ICON)) {
+            val legacyShow = prefs.getBoolean(SettingsStore.LEGACY_SHOW_LAUNCHER_ICON, true)
+            prefs.edit()
+                .putBoolean(SettingsStore.HIDE_LAUNCHER_ICON, !legacyShow)
+                .apply()
+        }
+        return true
+    }
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         if (!isTrustedCaller()) return null
-        val prefs = context?.getSharedPreferences(
-            PREFS_NAME,
-            Context.MODE_PRIVATE
-        ) ?: return null
+        val prefs = preferences() ?: return null
 
         return when (method) {
             METHOD_GET -> Bundle().apply {
@@ -33,6 +39,11 @@ class SettingsProvider : ContentProvider() {
             else -> null
         }
     }
+
+    private fun preferences() = context?.getSharedPreferences(
+        PREFS_NAME,
+        Context.MODE_PRIVATE
+    )
 
     private fun isTrustedCaller(): Boolean {
         val callerUid = Binder.getCallingUid()
@@ -70,7 +81,7 @@ class SettingsProvider : ContentProvider() {
         val validKeys = setOf(
             SettingsStore.MIUIX_STYLE,
             SettingsStore.POWER_DOUBLE_CLICK,
-            SettingsStore.SHOW_LAUNCHER_ICON
+            SettingsStore.HIDE_LAUNCHER_ICON
         )
     }
 }

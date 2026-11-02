@@ -17,8 +17,8 @@ android {
         applicationId = "com.mipay.gpay.lsp"
         minSdk = 30
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.5"
+        versionCode = 5
+        versionName = "1.6"
     }
 
     signingConfigs {

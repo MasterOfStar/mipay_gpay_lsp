@@ -16,51 +16,55 @@ import android.widget.TextView
 class MainActivity : Activity() {
     private lateinit var contentLayout: LinearLayout
 
+    private data class Tokens(
+        val pageBackground: Int,
+        val cardBackground: Int,
+        val titleColor: Int,
+        val subtitleColor: Int,
+        val cardRadiusDp: Float,
+        val rowMinHeightDp: Int,
+        val rowHorizontalPaddingDp: Int,
+        val rowVerticalPaddingDp: Int,
+        val titleSp: Float,
+        val subtitleSp: Float,
+        val headerSp: Float,
+        val headerTypeface: Typeface,
+        val headerGapDp: Int
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         syncLauncherIcon()
 
         val density = resources.displayMetrics.density
-        val miuixEnabled = SettingsStore.getBoolean(this, SettingsStore.MIUIX_STYLE)
-        val darkMode = isDarkMode()
-        val backgroundColor = if (miuixEnabled) {
-            if (darkMode) Color.parseColor("#000000") else Color.parseColor("#F2F2F7")
-        } else {
-            Color.WHITE
-        }
-        val cardColor = if (miuixEnabled) {
-            if (darkMode) Color.parseColor("#1C1C1E") else Color.WHITE
-        } else {
-            Color.parseColor("#F6F6F8")
-        }
-        val titleColor = if (darkMode) Color.WHITE else Color.BLACK
-        val subtitleColor = if (darkMode) Color.parseColor("#9A9AA0") else Color.parseColor("#6D6D72")
+        val dark = isDarkMode()
+        val miuix = SettingsStore.getBoolean(this, SettingsStore.MIUIX_STYLE)
+        val tokens = buildTokens(miuix, dark)
 
         contentLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                (20 * density).toInt(),
+                (16 * density).toInt(),
                 (24 * density).toInt(),
-                (20 * density).toInt(),
+                (16 * density).toInt(),
                 (24 * density).toInt()
             )
         }
 
         contentLayout.addView(TextView(this).apply {
             text = "MiPay GPay"
-            textSize = 28f
-            setTextColor(titleColor)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            textSize = tokens.headerSp
+            setTextColor(tokens.titleColor)
+            typeface = tokens.headerTypeface
         })
 
-        addSpacer((16 * density).toInt())
+        addSpacer((tokens.headerGapDp * density).toInt())
         addCard(
             title = "MIUIX 风格",
-            subtitle = "设置页和注入按钮使用 MIUIX 样式",
-            checked = miuixEnabled,
-            cardColor = cardColor,
-            titleColor = titleColor,
-            subtitleColor = subtitleColor
+            subtitle = "设置页和注入按钮统一使用 MIUIX 样式",
+            checked = miuix,
+            tokens = tokens,
+            miuix = miuix
         ) { enabled ->
             SettingsStore.setBoolean(this, SettingsStore.MIUIX_STYLE, enabled)
             recreate()
@@ -71,29 +75,27 @@ class MainActivity : Activity() {
             title = "双击电源键唤起",
             subtitle = "替代 MiPay 双击电源键逻辑并打开 Google Pay",
             checked = SettingsStore.getBoolean(this, SettingsStore.POWER_DOUBLE_CLICK),
-            cardColor = cardColor,
-            titleColor = titleColor,
-            subtitleColor = subtitleColor
+            tokens = tokens,
+            miuix = miuix
         ) { enabled ->
             SettingsStore.setBoolean(this, SettingsStore.POWER_DOUBLE_CLICK, enabled)
         }
 
         addSpacer((12 * density).toInt())
         addCard(
-            title = "显示桌面图标",
-            subtitle = "默认隐藏，仅保留 LSPosed 隐式入口",
-            checked = SettingsStore.getBoolean(this, SettingsStore.SHOW_LAUNCHER_ICON),
-            cardColor = cardColor,
-            titleColor = titleColor,
-            subtitleColor = subtitleColor
-        ) { enabled ->
-            SettingsStore.setBoolean(this, SettingsStore.SHOW_LAUNCHER_ICON, enabled)
+            title = "隐藏桌面图标",
+            subtitle = "默认显示桌面图标，打开后仅保留 LSPosed 隐式入口",
+            checked = SettingsStore.getBoolean(this, SettingsStore.HIDE_LAUNCHER_ICON),
+            tokens = tokens,
+            miuix = miuix
+        ) { hidden ->
+            SettingsStore.setBoolean(this, SettingsStore.HIDE_LAUNCHER_ICON, hidden)
             syncLauncherIcon()
         }
 
         setContentView(
             ScrollView(this).apply {
-                setBackgroundColor(backgroundColor)
+                setBackgroundColor(tokens.pageBackground)
                 addView(
                     contentLayout,
                     ViewGroup.LayoutParams(
@@ -103,15 +105,53 @@ class MainActivity : Activity() {
                 )
             }
         )
+        applySystemBars(tokens.pageBackground, dark)
+    }
+
+    private fun buildTokens(miuix: Boolean, dark: Boolean): Tokens {
+        return if (miuix) {
+            Tokens(
+                pageBackground = Color.parseColor(if (dark) "#000000" else "#F7F7F7"),
+                cardBackground = Color.parseColor(if (dark) "#242424" else "#FFFFFF"),
+                titleColor = if (dark) Color.argb(0xE6, 255, 255, 255) else Color.BLACK,
+                subtitleColor = if (dark) Color.argb(0x80, 255, 255, 255)
+                else Color.argb(0x99, 0, 0, 0),
+                cardRadiusDp = 16f,
+                rowMinHeightDp = 56,
+                rowHorizontalPaddingDp = 16,
+                rowVerticalPaddingDp = 10,
+                titleSp = 17f,
+                subtitleSp = 14f,
+                headerSp = 32f,
+                headerTypeface = Typeface.create("sans-serif-medium", Typeface.NORMAL),
+                headerGapDp = 20
+            )
+        } else {
+            Tokens(
+                pageBackground = Color.parseColor(if (dark) "#141218" else "#FFFBFE"),
+                cardBackground = Color.parseColor(if (dark) "#211F26" else "#F3EDF7"),
+                titleColor = Color.parseColor(if (dark) "#E6E0E9" else "#1C1B1F"),
+                subtitleColor = Color.parseColor(if (dark) "#CAC4D0" else "#49454F"),
+                cardRadiusDp = 12f,
+                rowMinHeightDp = 72,
+                rowHorizontalPaddingDp = 16,
+                rowVerticalPaddingDp = 12,
+                titleSp = 16f,
+                subtitleSp = 14f,
+                headerSp = 28f,
+                headerTypeface = Typeface.create("sans-serif", Typeface.NORMAL),
+                headerGapDp = 16
+            )
+        }
     }
 
     private fun syncLauncherIcon() {
-        val enabled = SettingsStore.getBoolean(this, SettingsStore.SHOW_LAUNCHER_ICON)
+        val hidden = SettingsStore.getBoolean(this, SettingsStore.HIDE_LAUNCHER_ICON)
         val component = ComponentName(packageName, "$packageName.LauncherActivity")
-        val newState = if (enabled) {
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-        } else {
+        val newState = if (hidden) {
             PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
         }
         packageManager.setComponentEnabledSetting(
             component,
@@ -124,21 +164,20 @@ class MainActivity : Activity() {
         title: String,
         subtitle: String,
         checked: Boolean,
-        cardColor: Int,
-        titleColor: Int,
-        subtitleColor: Int,
+        tokens: Tokens,
+        miuix: Boolean,
         onChanged: (Boolean) -> Unit
     ) {
         val density = resources.displayMetrics.density
-        val miuixEnabled = SettingsStore.getBoolean(this, SettingsStore.MIUIX_STYLE)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = (tokens.rowMinHeightDp * density).toInt()
             setPadding(
-                (20 * density).toInt(),
-                (16 * density).toInt(),
-                (16 * density).toInt(),
-                (16 * density).toInt()
+                (tokens.rowHorizontalPaddingDp * density).toInt(),
+                (tokens.rowVerticalPaddingDp * density).toInt(),
+                (tokens.rowHorizontalPaddingDp * density).toInt(),
+                (tokens.rowVerticalPaddingDp * density).toInt()
             )
         }
 
@@ -147,31 +186,33 @@ class MainActivity : Activity() {
         }
         textLayout.addView(TextView(this).apply {
             text = title
-            textSize = 17f
-            setTextColor(titleColor)
+            textSize = tokens.titleSp
+            setTextColor(tokens.titleColor)
         })
         textLayout.addView(TextView(this).apply {
             text = subtitle
-            textSize = 13f
-            setTextColor(subtitleColor)
+            textSize = tokens.subtitleSp
+            setTextColor(tokens.subtitleColor)
             setPadding(0, (4 * density).toInt(), 0, 0)
         })
 
+        val toggle = MiuixSwitch(this, miuix).apply {
+            isChecked = checked
+            setOnCheckedChangeListener(onChanged)
+        }
         row.addView(
             textLayout,
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         )
-        row.addView(MiuixSwitch(this).apply {
-            isChecked = checked
-            setOnCheckedChangeListener(onChanged)
-        })
+        row.addView(toggle)
+        row.setOnClickListener { toggle.toggle() }
 
         contentLayout.addView(
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = GradientDrawable().apply {
-                    setColor(cardColor)
-                    cornerRadius = (if (miuixEnabled) 16f else 8f) * density
+                    setColor(tokens.cardBackground)
+                    cornerRadius = tokens.cardRadiusDp * density
                 }
                 addView(row)
             },
@@ -190,6 +231,25 @@ class MainActivity : Activity() {
                 heightPx
             )
         )
+    }
+
+    private fun applySystemBars(backgroundColor: Int, dark: Boolean) {
+        window.statusBarColor = backgroundColor
+        window.navigationBarColor = backgroundColor
+        var flags = window.decorView.systemUiVisibility
+        flags = if (dark) {
+            flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+        } else {
+            flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            flags = if (dark) {
+                flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            } else {
+                flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+        }
+        window.decorView.systemUiVisibility = flags
     }
 
     private fun isDarkMode(): Boolean {

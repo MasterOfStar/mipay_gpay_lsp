@@ -47,8 +47,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true">
+            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
             <intent-filter>
                 <action android:name="com.mipay.gpay.lsp.SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -57,7 +56,7 @@
 
         <activity-alias
             android:name=".LauncherActivity"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true"
             android:targetActivity=".MainActivity">
             <intent-filter>

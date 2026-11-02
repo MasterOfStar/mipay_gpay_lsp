@@ -37,7 +37,8 @@ class RootCommandProvider : ContentProvider() {
         val flags = MainHook.WALLET_QUICKDRAW_FLAGS.toString(16)
         val command = "/system/bin/am start -f 0x$flags " +
                 "-a ${MainHook.WALLET_QUICKDRAW_ACTION} " +
-                "-n ${MainHook.WALLET_PKG}/${MainHook.WALLET_QUICKDRAW_ACTIVITY}"
+                "-n ${MainHook.WALLET_PKG}/${MainHook.WALLET_QUICKDRAW_ACTIVITY} " +
+                "--ez ${MainHook.EXTRA_QUICKDRAW_SESSION} true"
         val result = runRootCommand(command)
 
         return Bundle().apply {

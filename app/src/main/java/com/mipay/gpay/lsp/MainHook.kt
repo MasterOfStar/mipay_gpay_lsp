@@ -8,6 +8,8 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.net.Uri
 import android.nfc.NfcAdapter
@@ -42,9 +44,11 @@ class MainHook : IXposedHookLoadPackage {
         // Google Wallet 快捷刷卡页
         const val WALLET_QUICKDRAW_ACTION = "com.google.android.apps.wallet.main.QUICKDRAW"
         const val WALLET_QUICKDRAW_ACTIVITY = "com.google.android.apps.wallet.pmode.PresentationModeActivity"
-        // NEW_TASK | MULTIPLE_TASK | EXCLUDE_FROM_RECENTS
+        // 标记本次启动，system_server 用它区分普通 Wallet 页面和锁屏 QuickDraw
+        const val EXTRA_QUICKDRAW_SESSION = "com.mipay.gpay.lsp.QUICKDRAW_SESSION"
+        // NEW_TASK | MULTIPLE_TASK | EXCLUDE_FROM_RECENTS | SHOW_WHEN_LOCKED
         // 独立 task 且不进入最近任务，避免覆盖已经打开的 Wallet 主任务
-        const val WALLET_QUICKDRAW_FLAGS = 0x18800000
+        const val WALLET_QUICKDRAW_FLAGS = 0x18880000
         // MiPay NFC 组件 (系统默认)
         private const val MIPAY_COMPONENT = "com.android.nfc/com.android.nfc.cardemulation.ESEWalletDummyService"
 
@@ -65,12 +69,8 @@ class MainHook : IXposedHookLoadPackage {
 
         @JvmStatic
         fun launchWalletQuickDrawFromSystem(context: Context) {
-            Thread {
-                if (!startWalletQuickDrawActivity(context)) {
-                    log("SYSTEM direct QuickDraw start failed; use root provider")
-                    launchWalletQuickDraw(context)
-                }
-            }.start()
+            // 有 root 时优先走 root provider；provider 不可用再回退到直接 startActivity。
+            launchWalletQuickDraw(context)
         }
 
         @JvmStatic
@@ -111,6 +111,7 @@ class MainHook : IXposedHookLoadPackage {
                 context.startActivity(Intent(WALLET_QUICKDRAW_ACTION).apply {
                     component = ComponentName(WALLET_PKG, WALLET_QUICKDRAW_ACTIVITY)
                     flags = WALLET_QUICKDRAW_FLAGS
+                    putExtra(EXTRA_QUICKDRAW_SESSION, true)
                 })
                 true
             } catch (e: Throwable) {
@@ -169,8 +170,7 @@ class MainHook : IXposedHookLoadPackage {
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        val mode = ExperimentConfig.mode()
-        DevLog.i("LOAD package=${lpparam.packageName} mode=$mode")
+        DevLog.i("LOAD package=${lpparam.packageName}")
         when (lpparam.packageName) {
             MIPAY_PKG -> setupMiPayHooks(lpparam)
             "android" -> {
@@ -221,15 +221,26 @@ class MainHook : IXposedHookLoadPackage {
 
     private fun injectButton(activity: Activity) {
         val decor = activity.window.decorView as? ViewGroup ?: return
-        if (decor.findViewWithTag<View>(INJECT_TAG) != null) return
+        val miuixStyle = SettingsStore.getBoolean(decor.context, SettingsStore.MIUIX_STYLE)
+        val existing = decor.findViewWithTag<GooglePayButtonView>(INJECT_TAG)
+        if (existing != null) {
+            existing.applyStyle(miuixStyle)
+            positionButton(existing, decor, miuixStyle)
+            return
+        }
 
         val btn = GooglePayButtonView(decor.context).apply {
             tag = INJECT_TAG
             setSvgString(GOOGLE_PAY_SVG)
+            applyStyle(miuixStyle)
         }
 
+        positionButton(btn, decor, miuixStyle)
+        decor.post { decor.addView(btn) }
+    }
+
+    private fun positionButton(btn: View, decor: ViewGroup, miuixStyle: Boolean) {
         val density = decor.context.resources.displayMetrics.density
-        val miuixStyle = SettingsStore.getBoolean(decor.context, SettingsStore.MIUIX_STYLE)
         val w = ((if (miuixStyle) 112 else 104) * density).toInt()
         val h = ((if (miuixStyle) 48 else 58) * density).toInt()
 
@@ -243,8 +254,6 @@ class MainHook : IXposedHookLoadPackage {
                 }
             }
         }
-
-        decor.post { decor.addView(btn) }
     }
 }
 
@@ -254,32 +263,18 @@ class GooglePayButtonView @JvmOverloads constructor(
 
     private var svg: SVG? = null
     private var bmp: Bitmap? = null
+    private val logoBounds = Rect()
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val svgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
-    private val isMiuixStyle = SettingsStore.getBoolean(context, SettingsStore.MIUIX_STYLE)
-
-    private val bgColor: Int by lazy {
-        val isDark = (context.resources.configuration.uiMode and
-                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                android.content.res.Configuration.UI_MODE_NIGHT_YES
-        when {
-            isDark -> {
-                if (isMiuixStyle) android.graphics.Color.parseColor("#1C1C1E")
-                else android.graphics.Color.parseColor("#121212")
-            }
-            Build.VERSION.SDK_INT >= 31 -> context.theme.resources.getColor(
-                android.R.color.system_accent1_100, context.theme
-            )
-            else -> android.graphics.Color.rgb(33, 150, 243)
-        }
-    }
+    private val shapePath = Path()
+    private var isMiuixStyle = SettingsStore.getBoolean(context, SettingsStore.MIUIX_STYLE)
 
     init {
         isClickable = true
         setOnClickListener {
             try {
-                MainHook.log("BUTTON click: set NFC = WALLET, mode=${ExperimentConfig.mode()}")
+                MainHook.log("BUTTON click: set NFC = WALLET")
                 MainHook.setNfcComponentStatic(context, MainHook.WALLET_COMPONENT)
                 MainHook.launchWalletQuickDraw(context)
             } catch (e: Throwable) {
@@ -298,16 +293,50 @@ class GooglePayButtonView @JvmOverloads constructor(
         }
     }
 
+    fun applyStyle(miuix: Boolean) {
+        isMiuixStyle = miuix
+        prepareBmp()
+        requestLayout()
+        invalidate()
+    }
+
     private fun prepareBmp() {
         val svgObj = svg ?: return
         val pic = svgObj.renderToPicture()
-        bmp = Bitmap.createBitmap(160, 76, Bitmap.Config.ARGB_8888).apply {
-            Canvas(this).apply {
-                save()
-                scale(160f / pic.width, 76f / pic.height)
-                drawPicture(pic)
-                restore()
+        val pictureWidth = pic.width.takeIf { it > 0 } ?: 80
+        val pictureHeight = pic.height.takeIf { it > 0 } ?: 38
+        val targetHeight = (32 * resources.displayMetrics.density).toInt().coerceAtLeast(48)
+        val targetWidth = (targetHeight * pictureWidth.toFloat() / pictureHeight)
+            .toInt()
+            .coerceAtLeast(1)
+
+        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        Canvas(bitmap).apply {
+            scale(targetWidth.toFloat() / pictureWidth, targetHeight.toFloat() / pictureHeight)
+            drawPicture(pic)
+        }
+        bmp = bitmap
+
+        logoBounds.set(0, 0, targetWidth, targetHeight)
+        val pixels = IntArray(targetWidth * targetHeight)
+        bitmap.getPixels(pixels, 0, targetWidth, 0, 0, targetWidth, targetHeight)
+        var minX = targetWidth
+        var minY = targetHeight
+        var maxX = -1
+        var maxY = -1
+        for (y in 0 until targetHeight) {
+            for (x in 0 until targetWidth) {
+                val alpha = (pixels[y * targetWidth + x] ushr 24) and 0xFF
+                if (alpha > 8) {
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                }
             }
+        }
+        if (maxX >= minX && maxY >= minY) {
+            logoBounds.set(minX, minY, maxX + 1, maxY + 1)
         }
     }
 
@@ -323,14 +352,58 @@ class GooglePayButtonView @JvmOverloads constructor(
         val w = width.toFloat()
         val h = height.toFloat()
         rect.set(0f, 0f, w, h)
-        bgPaint.color = bgColor
-        val cornerRadius = if (isMiuixStyle) 16 * resources.displayMetrics.density else h / 2
-        c.drawRoundRect(rect, cornerRadius, cornerRadius, bgPaint)
+        bgPaint.color = backgroundColor()
+        if (isMiuixStyle) {
+            buildSquircle(w, h, 16 * resources.displayMetrics.density)
+            c.drawPath(shapePath, bgPaint)
+        } else {
+            c.drawRoundRect(rect, h / 2, h / 2, bgPaint)
+        }
 
         bmp?.let {
-            val th = h * 0.6f
-            val tw = it.width.toFloat() / it.height * th
-            c.drawBitmap(it, null, RectF((w - tw) / 2, (h - th) / 2, (w + tw) / 2, (h + th) / 2), svgPaint)
+            if (logoBounds.width() <= 0 || logoBounds.height() <= 0) return@let
+            val targetHeight = h * (if (isMiuixStyle) 0.68f else 0.60f)
+            val targetWidth = targetHeight * logoBounds.width() / logoBounds.height()
+            val left = (w - targetWidth) / 2
+            val top = (h - targetHeight) / 2
+            c.drawBitmap(
+                it,
+                logoBounds,
+                RectF(left, top, left + targetWidth, top + targetHeight),
+                svgPaint
+            )
         }
+    }
+
+    private fun backgroundColor(): Int {
+        val isDark = (context.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        return when {
+            isMiuixStyle -> android.graphics.Color.parseColor(
+                if (isDark) "#434343" else "#F0F0F0"
+            )
+            isDark -> android.graphics.Color.parseColor("#1D1B20")
+            Build.VERSION.SDK_INT >= 31 -> context.theme.resources.getColor(
+                android.R.color.system_accent1_100, context.theme
+            )
+            else -> android.graphics.Color.rgb(33, 150, 243)
+        }
+    }
+
+    private fun buildSquircle(w: Float, h: Float, radius: Float) {
+        val tile = minOf(radius * 1.1f, minOf(w, h) / 2f)
+        val handle = tile * (1f - 0.643f)
+        shapePath.rewind()
+        shapePath.moveTo(tile, 0f)
+        shapePath.lineTo(w - tile, 0f)
+        shapePath.cubicTo(w - handle, 0f, w, handle, w, tile)
+        shapePath.lineTo(w, h - tile)
+        shapePath.cubicTo(w, h - handle, w - handle, h, w - tile, h)
+        shapePath.lineTo(tile, h)
+        shapePath.cubicTo(handle, h, 0f, h - handle, 0f, h - tile)
+        shapePath.lineTo(0f, tile)
+        shapePath.cubicTo(0f, handle, handle, 0f, tile, 0f)
+        shapePath.close()
     }
 }
