@@ -12,12 +12,14 @@ import android.os.Process
 class SettingsProvider : ContentProvider() {
 
     override fun onCreate(): Boolean {
-        val prefs = preferences() ?: return true
-        if (!prefs.contains(SettingsStore.HIDE_LAUNCHER_ICON)) {
-            val legacyShow = prefs.getBoolean(SettingsStore.LEGACY_SHOW_LAUNCHER_ICON, true)
-            prefs.edit()
-                .putBoolean(SettingsStore.HIDE_LAUNCHER_ICON, !legacyShow)
-                .apply()
+        runCatching {
+            val prefs = preferences() ?: return true
+            if (!prefs.contains(SettingsStore.HIDE_LAUNCHER_ICON)) {
+                val legacyShow = prefs.getBoolean(SettingsStore.LEGACY_SHOW_LAUNCHER_ICON, true)
+                prefs.edit()
+                    .putBoolean(SettingsStore.HIDE_LAUNCHER_ICON, !legacyShow)
+                    .apply()
+            }
         }
         return true
     }
