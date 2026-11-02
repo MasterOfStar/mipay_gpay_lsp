@@ -78,7 +78,18 @@ class MainHook : IXposedHookLoadPackage {
                 if (powerManager != null && !powerManager.isInteractive) {
                     log("SYSTEM screen off; wake up before QuickDraw")
                     runCatching {
-                        powerManager.wakeUp(SystemClock.uptimeMillis(), "mipay-gpay-quickdraw")
+                        XposedHelpers.callMethod(
+                            powerManager,
+                            "wakeUp",
+                            SystemClock.uptimeMillis(),
+                            "mipay-gpay-quickdraw"
+                        )
+                    }.recoverCatching {
+                        XposedHelpers.callMethod(
+                            powerManager,
+                            "wakeUp",
+                            SystemClock.uptimeMillis()
+                        )
                     }.onFailure {
                         log("SYSTEM wake up failed: ${it.message}")
                     }
