@@ -34,9 +34,11 @@ class RootCommandProvider : ContentProvider() {
     }
 
     private fun launchWalletQuickDraw(): Bundle {
-        val flags = MainHook.WALLET_QUICKDRAW_FLAGS.toString(16)
+        val flags = WalletQuickDraw.FLAGS.toString(16)
         val command = "/system/bin/am start -f 0x$flags " +
-                "-n com.mipay.gpay.lsp/.QuickDrawLaunchActivity"
+                "-a ${WalletQuickDraw.ACTION} " +
+                "-n ${WalletQuickDraw.PACKAGE}/${WalletQuickDraw.ACTIVITY} " +
+                "--ez ${WalletQuickDraw.EXTRA_SESSION} true"
         val result = runRootCommand(command)
 
         return Bundle().apply {

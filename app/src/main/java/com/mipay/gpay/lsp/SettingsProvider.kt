@@ -20,9 +20,6 @@ class SettingsProvider : ContentProvider() {
                     .putBoolean(SettingsStore.HIDE_LAUNCHER_ICON, !legacyShow)
                     .apply()
             }
-            if (!prefs.contains(SettingsStore.WALLET_NATIVE_AUTH)) {
-                prefs.edit().putBoolean(SettingsStore.WALLET_NATIVE_AUTH, true).apply()
-            }
         }
         return true
     }
@@ -86,7 +83,6 @@ class SettingsProvider : ContentProvider() {
         val validKeys = setOf(
             SettingsStore.MIUIX_STYLE,
             SettingsStore.POWER_DOUBLE_CLICK,
-            SettingsStore.WALLET_NATIVE_AUTH,
             SettingsStore.HIDE_LAUNCHER_ICON
         )
     }

@@ -1,7 +1,6 @@
 package com.mipay.gpay.lsp
 
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
@@ -117,21 +116,6 @@ object SystemServerQuickDrawHooks {
         )
 
         if (visible) {
-            val nativeAuth = contextOf(param.thisObject)?.let {
-                SettingsStore.getBoolean(it, SettingsStore.WALLET_NATIVE_AUTH, true)
-            } ?: true
-            if (nativeAuth) {
-                DevLog.i("SYSTEM Wallet native auth mode: reject system dismiss")
-                if (callback != null) {
-                    runCatching {
-                        XposedHelpers.callMethod(callback, "onDismissError")
-                    }.onFailure {
-                        DevLog.e("SYSTEM onDismissError callback failed", it)
-                    }
-                }
-                skipOriginal(param)
-                return
-            }
             DevLog.i("SYSTEM Wallet QuickDraw visible; allow real keyguard authentication")
             return
         }
@@ -180,34 +164,15 @@ object SystemServerQuickDrawHooks {
                         "SYSTEM deferred Wallet ready after ${elapsed}ms " +
                             "visibleIgnoringKeyguard=$visibleIgnoringKeyguard nowVisible=$nowVisible"
                     )
-                    finishDeferredDismiss(method, thisObject, args)
+                    invokeOriginal(method, thisObject, args)
                 }
                 elapsed >= MAX_WAIT_MS -> {
                     DevLog.e("SYSTEM deferred Wallet timeout after ${elapsed}ms; invoke original")
-                    finishDeferredDismiss(method, thisObject, args)
+                    invokeOriginal(method, thisObject, args)
                 }
                 else -> deferUntilVisible(param, token, loader, startedAt)
             }
         }, RETRY_INTERVAL_MS)
-    }
-
-    private fun finishDeferredDismiss(method: Member, thisObject: Any?, args: Array<Any?>) {
-        val nativeAuth = contextOf(thisObject)?.let {
-            SettingsStore.getBoolean(it, SettingsStore.WALLET_NATIVE_AUTH, true)
-        } ?: true
-        if (nativeAuth) {
-            val callback = args.getOrNull(1)
-            if (callback != null) {
-                runCatching {
-                    XposedHelpers.callMethod(callback, "onDismissError")
-                }.onFailure {
-                    DevLog.e("SYSTEM deferred onDismissError callback failed", it)
-                }
-            }
-            DevLog.i("SYSTEM deferred Wallet native auth: reject system dismiss")
-            return
-        }
-        invokeOriginal(method, thisObject, args)
     }
 
     private fun invokeOriginal(method: Member, thisObject: Any?, args: Array<Any?>) {
@@ -230,15 +195,6 @@ object SystemServerQuickDrawHooks {
         return runCatching {
             val service = XposedHelpers.getObjectField(owner, "mService")
             XposedHelpers.getObjectField(service, "mGlobalLock")
-        }.getOrNull()
-    }
-
-    private fun contextOf(owner: Any?): Context? {
-        return runCatching {
-            XposedHelpers.getObjectField(owner, "mContext") as? Context
-        }.getOrNull() ?: runCatching {
-            val service = XposedHelpers.getObjectField(owner, "mService")
-            XposedHelpers.getObjectField(service, "mContext") as? Context
         }.getOrNull()
     }
 

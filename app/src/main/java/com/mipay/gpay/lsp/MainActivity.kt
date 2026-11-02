@@ -71,23 +71,12 @@ class MainActivity : Activity() {
         addSpacer((12 * density).toInt())
         addCard(
             title = "双击电源键唤起",
-            subtitle = "替代 MiPay 双击电源键逻辑并打开 Google Pay",
+            subtitle = "替代 MiPay 双击电源键逻辑并打开 Google Pay；需在 LSPosed 作用域勾选 System Framework（android）",
             checked = SettingsStore.getBoolean(this, SettingsStore.POWER_DOUBLE_CLICK),
             tokens = tokens,
             miuix = miuix
         ) { enabled ->
             SettingsStore.setBoolean(this, SettingsStore.POWER_DOUBLE_CLICK, enabled)
-        }
-
-        addSpacer((12 * density).toInt())
-        addCard(
-            title = "Wallet 内鉴权",
-            subtitle = "锁屏下先尝试 Wallet 自己的鉴权；失败可关闭改用系统解锁",
-            checked = SettingsStore.getBoolean(this, SettingsStore.WALLET_NATIVE_AUTH, true),
-            tokens = tokens,
-            miuix = miuix
-        ) { enabled ->
-            SettingsStore.setBoolean(this, SettingsStore.WALLET_NATIVE_AUTH, enabled)
         }
 
         addSpacer((12 * density).toInt())

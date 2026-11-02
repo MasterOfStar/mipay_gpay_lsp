@@ -2,11 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="com.mipay.gpay.lsp.permission.QUICKDRAW" />
-
-    <permission
-        android:name="com.mipay.gpay.lsp.permission.QUICKDRAW"
-        android:protectionLevel="signature" />
 
     <queries>
         <package android:name="com.miui.tsmclient" />
@@ -63,16 +58,6 @@
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".QuickDrawLaunchActivity"
-            android:excludeFromRecents="true"
-            android:exported="true"
-            android:noHistory="true"
-            android:permission="com.mipay.gpay.lsp.permission.QUICKDRAW"
-            android:showWhenLocked="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:turnScreenOn="true" />
 
         <activity-alias
             android:name=".LauncherActivity"
