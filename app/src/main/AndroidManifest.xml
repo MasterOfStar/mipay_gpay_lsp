@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <queries>
+        <package android:name="com.miui.tsmclient" />
+    </queries>
+
+    <application
+        android:label="MiPay GPay"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false">
+
+        <!-- LSPosed 模块声明 -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposedmodname"
+            android:value="MiPay GPay" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="为Mipay添加Google Pay的跳转按钮，并自动设置默认付款应用" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="54" />
+
+        <!-- LSPosed 作用域 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+        <provider
+            android:name=".RootCommandProvider"
+            android:authorities="com.mipay.gpay.lsp.root"
+            android:exported="true"
+            android:directBootAware="true" />
+
+        <!-- NFC 切换广播接收器：动态注册，无需声明 -->
+
+    </application>
+
+</manifest>
