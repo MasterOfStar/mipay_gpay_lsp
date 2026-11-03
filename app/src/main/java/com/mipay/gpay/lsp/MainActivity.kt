@@ -70,8 +70,8 @@ class MainActivity : Activity() {
 
         addSpacer((12 * density).toInt())
         addCard(
-            title = "双击电源键唤起",
-            subtitle = "替代 MiPay 双击电源键逻辑并打开 Google Pay；需在 LSPosed 作用域勾选 System Framework（android）",
+            title = "双击电源键唤起Google Pay",
+            subtitle = "（实验性）将双击电源键的功能替换为唤起Google Pay\n作用域需要勾选系统框架",
             checked = SettingsStore.getBoolean(this, SettingsStore.POWER_DOUBLE_CLICK),
             tokens = tokens,
             miuix = miuix
